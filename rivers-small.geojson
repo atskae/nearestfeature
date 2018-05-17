@@ -3,12 +3,10 @@
 "name": "rivers",
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
 "features": [
-{ "type": "Feature", "properties": { }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 31.197499147756854, -22.37479967808083 ], [ 31.202139688833981, -22.376386579162098 ] ] ] } },
-{ "type": "Feature", "properties": { }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 31.222498899152111, -22.37895962859514 ], [ 31.238776630149665, -22.366403821788879 ] ] ] } },
-{ "type": "Feature", "properties": { }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 31.171595132453369, -22.439892211951204 ], [ 31.170393991460575, -22.435182587482828 ] ] ] } },
-{ "type": "Feature", "properties": { }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 31.300905726187416, -22.439498935396056 ], [ 31.305444937980763, -22.441714152665135 ] ] ] } },
-{ "type": "Feature", "properties": { }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 31.14086829086299, -22.456609211759943 ], [ 31.144535885579913, -22.451142719460517 ] ] ] } },
-{ "type": "Feature", "properties": { }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 31.308702112410057, -22.461526774052636 ], [ 31.309832145482652, -22.456481115663227 ] ] ] } },
-{ "type": "Feature", "properties": { }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 31.144420487319078, -22.459810849356547 ], [ 31.14086829086299, -22.456609211759943 ] ] ] } },
+{ "type": "Feature", "properties": { }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 31.123686935740718, -22.346958661370632 ], [ 31.136444745520269, -22.336630287983841 ] ] ] } },
+{ "type": "Feature", "properties": { }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 31.121727475399009, -22.348290552164915 ], [ 31.123686935740718, -22.346958661370632 ] ] ] } },
+{ "type": "Feature", "properties": { }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 31.18155025387852, -22.361707002451585 ], [ 31.191621087377481, -22.371302325028754 ] ] ] } },
+{ "type": "Feature", "properties": { }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 31.191621087377481, -22.371302325028754 ], [ 31.194808621395417, -22.372602251867868 ] ] ] } },
+{ "type": "Feature", "properties": { }, "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 31.194808621395417, -22.372602251867868 ], [ 31.197499147756854, -22.37479967808083 ] ] ] } }
 ]
 }

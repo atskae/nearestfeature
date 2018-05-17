@@ -4,7 +4,7 @@
 #include <time.h> 	
 #include <string.h>
 #include "jsmn.h" // JSON file parser
-
+#include <math.h>
 /*
 
 	Nearest Feature
@@ -30,18 +30,27 @@ char* jsonString;
 jsmntok_t* tokens; 
 int numTokens = 0;
 int numPoints = 0;
+int numNodes = 0;
 
 typedef struct point {
-	float x;
-	float y;
+	double x;
+	double y;
 } point;
+
+// stucture of arrays
+typedef struct points {
+	float* x;
+	float* y;
+} points;
 
 typedef enum axis_t {x_axis, y_axis} axis_t;
 
 typedef struct node {
 	axis_t axis; // either x_axis or y_axis
-	float split_value;
-	point p; // only contains point if this node has no children
+	double split; // the value that determines which nodes go on the left/right
+	point* p; // only contains point if this node has no children
+	char visited;
+	int level;
 	struct node* left;
 	struct node* right;
 } node;
@@ -171,6 +180,131 @@ void quicksort(point* points, int l, int r, char dim) {
 	quicksort(points, sep+1, r, dim);
 }
 
+double max(double a, double b) {
+	if(a > b) return a;
+	else return b;
+}
+
+//typedef struct node {
+//	axis_t axis; // either x_axis or y_axis
+//	double split; // the value that determines which nodes go on the left/right
+//	point* p; // only contains point if this node has no children
+//	char visited;
+//	struct node* left;
+//	struct node* right;
+//} node;
+
+void printTree(node* queue[], int* head, int* tail, int count) {
+	
+	if(count == numNodes) return;
+
+	// take a node out of the queue
+	node* n = queue[ (*tail) ];
+	(*tail) = ((*tail) + 1)%numNodes;
+	
+	printf("axis %i, split %f, level %i ", n->axis, n->split, n->level);
+	if(n->p) printf("point (%f,%f)\n", n->p->x, n->p->y);
+	else printf("\n");
+
+	// put children in queue
+	if(n->left) {
+		queue[*head] = n->left;
+		(*head)=( *head +1)%numNodes;
+	}
+	if(n->right) {
+		queue[*head] = n->right;
+		(*head)=( *head +1)%numNodes;
+	}
+
+	printTree(queue, head, tail, ++count);	
+
+}
+
+void buildTree_r(node* root, point* p_x, axis_t axis, int l, int r) { // p_x = sorted points in x_axis, p_y = sorted points in y_axis
+
+	if(r == l || l > r) {
+		printf("leaf node (%f, %f)\n", p_x[r].x, p_x[r].y);
+		root->p = &p_x[r];
+		root->axis = (++axis)%2; // obtain the previous axis
+		root->visited = 1;
+		return;
+	}
+	int split_index = l;
+
+	if(root->visited == 0) {	
+		//float split;
+		double split;
+		if(axis == x_axis) split = p_x[l].x + (p_x[r].x - p_x[l].x)/2;
+		else split = p_x[l].y + (p_x[r].y - p_x[l].y)/2;
+	
+		// either the range contains all the same nodes....? Can be merged into one node I think..
+		if(split == 0)  {
+			printf("leaf node (%f, %f)\n", p_x[r].x, p_x[r].y);
+			root->p = &p_x[r];
+			root->axis = (++axis)%2;
+			root->visited = 1;
+			return;
+		}	
+	
+		root->split = split;
+		root->axis = axis;
+		root->p = NULL;
+		root->left = NULL;
+		root->right = NULL;
+		root->visited = 1;
+	}
+	
+	// find the split index
+	if(axis == x_axis) {
+		for(int i=l; i<=r; i++) {
+			if(p_x[i].x > root->split) {
+				split_index = max(l, i-1);
+				break;
+			}
+		}	
+	} else {
+		for(int i=l; i<=r; i++) {
+			if(p_x[i].y > root->split) {
+				split_index = max(l, i-1);
+				break;
+			}		
+		}
+	}
+	printf("axis %i, l=%i, r=%i, split %f, split_index %i, level %i\n", axis, l, r, root->split, split_index, root->level);
+	for(int i=0; i<numPoints; i++) {	
+		printf("%i: (%f, %f)\n", i, p_x[i].x, p_x[i].y);
+	}
+
+	node* n_l;
+	if(!root->left) {
+		n_l = (node*) malloc(sizeof(node));
+		n_l->visited = 0;
+		root->left = n_l;
+		root->left->level = root->level + 1;
+		numNodes++;
+	} else {
+		printf("This should never happen\n");
+	}	
+	// sort all the values to the left of split index
+	if(axis == x_axis) quicksort(p_x, l, split_index, 'y'); // sort in the opposite direction
+	else quicksort(p_x, l, split_index, 'x');
+	printf("axis %i l=%i, r=%i split %f, visiting empty left node next\n", root->axis, l, r, root->split);
+	buildTree_r(root->left, p_x, (++axis)%2, l, split_index);	
+
+	node* n_r;
+	if(!root->right) {
+		n_r = (node*) malloc(sizeof(node));
+		n_r->visited = 0;
+		root->right = n_r;
+		root->right->level = root->level + 1;
+		numNodes++;
+	}
+	if(axis == x_axis) quicksort(p_x, split_index+1, r, 'y'); // sort in the opposite direction
+	else quicksort(p_x, split_index+1, r, 'x');
+	printf("axis %i l=%i, r=%i split %f, visiting empty right node next\n", root->axis, l, r, root->split);
+	buildTree_r(root->right, p_x, (++axis)%2, split_index+1, r);			
+}
+
 void buildTree() {
 	
 	printf("buildTree()\n");
@@ -191,6 +325,23 @@ void buildTree() {
 	numPoints = tokens[features_index].size * 2; // each feature has 2 points
 	point* points_x = (point*) malloc(numPoints * sizeof(point));
 	printf("%d features\n", tokens[features_index].size);
+	
+	// structure of arrays
+	// sorted by x coordinate
+	points ps_x;
+	ps_x.x = (float*) malloc(numPoints * sizeof(float));
+	ps_x.y = (float*) malloc(numPoints * sizeof(float));
+	// sorted by y coordinate	
+	points ps_y;
+	ps_y.x = (float*) malloc(numPoints * sizeof(float));
+	ps_y.y = (float*) malloc(numPoints * sizeof(float));
+
+	int points_index = 0; // index into ps
+	memset(tokenStr, '\0', BUFFER_SIZE);	
+	
+	// to normalize the points
+	int total_x = 0;
+	int total_y = 0;
 	for(int i=0; i<tokens[features_index].size; i++) { // for each feature
 		while(strcmp(tokenStr, "coordinates") != 0) {
 			if(tokens[index].type == JSMN_STRING) getTokenString(index, tokenStr);
@@ -201,12 +352,17 @@ void buildTree() {
 
 		for(int j=0; j<2; j++) { // for each point; 2 points per line
 			getTokenString(index, tokenStr);
-			p.x = atof(tokenStr);	
+			p.x = atof(tokenStr);
+			total_x += p.x;
+//			printf("p.x string %s\n", tokenStr);	
 			getTokenString(index+1, tokenStr);
 			p.y = atof(tokenStr);
-			
+			total_y += p.y;
+//			printf("p.y string %s\n", tokenStr);							
 			points_x[i*2 + j] = p; 	
 			index+=3; // move three tokens ahead to get to next point
+			
+		//	points_index++;
 		}		
 	}
 
@@ -221,7 +377,43 @@ void buildTree() {
 
 	quicksort(points_x, 0, numPoints-1, 'x');
 	quicksort(points_y, 0, numPoints-1, 'y');	
+
+//	memcpy(ps_y.x, ps_x.x, numPoints*sizeof(float));
+//	memcpy(ps_y.y, ps_x.y, numPoints*sizeof(float));
+//
+//	quicksort_p(ps_x, 0, numPoints, 'x');
+//	quicksort_p(ps_y, 0, numPoints, 'y');
 	
+//	typedef struct node {
+//		axis_t axis; // either x_axis or y_axis
+//		float split; // the value that determines which nodes go on the left/right
+//		point p*; // only contains point if this node has no children
+//		struct node* left;
+//		struct node* right;
+//	} node;
+	
+	node* root = (node*) malloc(sizeof(node));	
+	root->visited = 0;
+	root->level = 0;
+	numNodes++;
+
+	double x_mean = total_x/numPoints;
+	double y_mean = total_y/numPoints;
+	printf("normalized with mean (%f,%f)\n ", x_mean, y_mean);
+	for(int i=0; i<numPoints; i++) {
+		points_x[i].x -= x_mean;
+		points_x[i].y -= y_mean;
+		printf("%i (%f, %f)\n", i, points_x[i].x, points_x[i].y);
+	}
+
+	printf("Build tree! los gehts!\n");
+	buildTree_r(root, points_x, x_axis, 0, numPoints-1);
+	printf("Build done. %i nodes\n", numNodes);
+	node* queue[numNodes];
+	queue[0] = root;	
+	int head = 1;
+	int tail = 0;
+	printTree(queue, &head, &tail, 1);
 	
 }
 
