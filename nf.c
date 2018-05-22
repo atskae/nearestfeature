@@ -31,23 +31,25 @@ jsmntok_t* tokens;
 int numTokens = 0;
 int numPoints = 0;
 int numNodes = 0;
+int duplicates = 0; // lines overlap points so there will be duplicate points in the dataset ; duplicates are not placed into the tree
+int uniquePoints = 0;
 
 typedef struct point {
-	double x;
-	double y;
+	long double x;
+	long double y;
 } point;
 
 // stucture of arrays
-typedef struct points {
-	float* x;
-	float* y;
-} points;
+//typedef struct points {
+//	float* x;
+//	float* y;
+//} points;
 
 typedef enum axis_t {x_axis, y_axis} axis_t;
 
 typedef struct node {
 	axis_t axis; // either x_axis or y_axis
-	double split; // the value that determines which nodes go on the left/right
+	long double split; // the value that determines which nodes go on the left/right
 	point* p; // only contains point if this node has no children
 	char visited;
 	int level;
@@ -58,7 +60,7 @@ typedef struct node {
 // returns the time elapsed in seconds 
 void elapsed(time_t start, time_t end) {
 	double t = ( ((double) (end - start)) / CLOCKS_PER_SEC );	
-	printf("%.5f s elapsed.\n", t);
+	printf("%.5f ms elapsed.\n", t*1000);
 }
 
 void getTokenString(int index, char* ptr) {
@@ -202,18 +204,18 @@ void printTree(node* queue[], int* head, int* tail, int count) {
 	node* n = queue[ (*tail) ];
 	(*tail) = ((*tail) + 1)%numNodes;
 	
-	printf("axis %i, split %f, level %i ", n->axis, n->split, n->level);
-	if(n->p) printf("point (%f,%f)\n", n->p->x, n->p->y);
-	else printf("\n");
+	printf("axis %i, level %i ", n->axis, n->level);
+	if(n->p) printf("point (%.3Lf,%.3Lf)\n", n->p->x, n->p->y);
+	else printf("split %.3Lf\n", n->split);
 
 	// put children in queue
 	if(n->left) {
 		queue[*head] = n->left;
-		(*head)=( *head +1)%numNodes;
+		(*head)=( *head + 1)%numNodes;
 	}
 	if(n->right) {
 		queue[*head] = n->right;
-		(*head)=( *head +1)%numNodes;
+		(*head)=( *head + 1)%numNodes;
 	}
 
 	printTree(queue, head, tail, ++count);	
@@ -222,34 +224,38 @@ void printTree(node* queue[], int* head, int* tail, int count) {
 
 void buildTree_r(node* root, point* p_x, axis_t axis, int l, int r) { // p_x = sorted points in x_axis, p_y = sorted points in y_axis
 
-	if(r == l || l > r) {
-		printf("leaf node (%f, %f)\n", p_x[r].x, p_x[r].y);
+	char dup = p_x[l].x == p_x[r].x && p_x[l].y == p_x[r].y && l != r; // checks if the points are duplicates
+	if(r == l || l > r || dup) { // a single point OR there are duplicate points
+		if(dup){
+			duplicates++;
+		//	printf("duplicate ");
+		}
+	//	printf("leaf node (%.3Lf, %.3Lf)\n", p_x[r].x, p_x[r].y);
 		root->p = &p_x[r];
 		root->axis = (++axis)%2; // obtain the previous axis
 		root->visited = 1;
+		uniquePoints++;
+
 		return;
 	}
 	int split_index = l;
 
 	if(root->visited == 0) {	
-		//float split;
-		double split;
-		if(axis == x_axis) split = p_x[l].x + (p_x[r].x - p_x[l].x)/2;
-		else split = p_x[l].y + (p_x[r].y - p_x[l].y)/2;
-	
+		//float split value;
+		long double split;
+		if(axis == x_axis) {
+			split = p_x[l].x + (p_x[r].x - p_x[l].x)/2;
+	//		printf("x-axis calculating split: %.3Lf + (%.3Lf - %.3Lf)/2\n", p_x[l].x, p_x[r].x, p_x[l].x);		
+		} else {
+			split = p_x[l].y + (p_x[r].y - p_x[l].y)/2;
+	//		printf("y-axis calculating split: %.3Lf + (%.3Lf - %.3Lf)/2\n", p_x[l].y, p_x[r].y, p_x[l].y);	
+		}
 		// either the range contains all the same nodes....? Can be merged into one node I think..
-		if(split == 0)  {
-			printf("leaf node (%f, %f)\n", p_x[r].x, p_x[r].y);
-			root->p = &p_x[r];
-			root->axis = (++axis)%2;
-			root->visited = 1;
-			return;
-		}	
 	
 		root->split = split;
 		root->axis = axis;
 		root->p = NULL;
-		root->left = NULL;
+		root->left = NULL; // point
 		root->right = NULL;
 		root->visited = 1;
 	}
@@ -270,11 +276,11 @@ void buildTree_r(node* root, point* p_x, axis_t axis, int l, int r) { // p_x = s
 			}		
 		}
 	}
-	printf("axis %i, l=%i, r=%i, split %f, split_index %i, level %i\n", axis, l, r, root->split, split_index, root->level);
-	for(int i=0; i<numPoints; i++) {	
-		printf("%i: (%f, %f)\n", i, p_x[i].x, p_x[i].y);
-	}
-
+//	printf("axis %i, l=%i, r=%i, split %.3Lf, split_index %i, level %i\n", axis, l, r, root->split, split_index, root->level);
+//	for(int i=0; i<numPoints; i++) {	
+//		printf("%i: (%f, %f)\n", i, p_x[i].x, p_x[i].y);
+//	}
+//
 	node* n_l;
 	if(!root->left) {
 		n_l = (node*) malloc(sizeof(node));
@@ -288,8 +294,8 @@ void buildTree_r(node* root, point* p_x, axis_t axis, int l, int r) { // p_x = s
 	// sort all the values to the left of split index
 	if(axis == x_axis) quicksort(p_x, l, split_index, 'y'); // sort in the opposite direction
 	else quicksort(p_x, l, split_index, 'x');
-	printf("axis %i l=%i, r=%i split %f, visiting empty left node next\n", root->axis, l, r, root->split);
-	buildTree_r(root->left, p_x, (++axis)%2, l, split_index);	
+//	printf("axis %i l=%i, r=%i split %.3Lf, visiting empty left node next\n", root->axis, l, r, root->split);
+	buildTree_r(root->left, p_x, (axis+1)%2, l, split_index);	
 
 	node* n_r;
 	if(!root->right) {
@@ -301,11 +307,11 @@ void buildTree_r(node* root, point* p_x, axis_t axis, int l, int r) { // p_x = s
 	}
 	if(axis == x_axis) quicksort(p_x, split_index+1, r, 'y'); // sort in the opposite direction
 	else quicksort(p_x, split_index+1, r, 'x');
-	printf("axis %i l=%i, r=%i split %f, visiting empty right node next\n", root->axis, l, r, root->split);
-	buildTree_r(root->right, p_x, (++axis)%2, split_index+1, r);			
+//	printf("axis %i l=%i, r=%i split %.3Lf, visiting empty right node next\n", root->axis, l, r, root->split);
+	buildTree_r(root->right, p_x, (axis+1)%2, split_index+1, r);			
 }
 
-void buildTree() {
+node* buildTree() {
 	
 	printf("buildTree()\n");
 	char tokenStr[BUFFER_SIZE];
@@ -328,20 +334,20 @@ void buildTree() {
 	
 	// structure of arrays
 	// sorted by x coordinate
-	points ps_x;
-	ps_x.x = (float*) malloc(numPoints * sizeof(float));
-	ps_x.y = (float*) malloc(numPoints * sizeof(float));
-	// sorted by y coordinate	
-	points ps_y;
-	ps_y.x = (float*) malloc(numPoints * sizeof(float));
-	ps_y.y = (float*) malloc(numPoints * sizeof(float));
-
+//	points ps_x;
+//	ps_x.x = (double*) malloc(numPoints * sizeof(double));
+//	ps_x.y = (double*) malloc(numPoints * sizeof(double));
+//	// sorted by y coordinate	
+//	points ps_y;
+//	ps_y.x = (double*) malloc(numPoints * sizeof(double));
+//	ps_y.y = (double*) malloc(numPoints * sizeof(double));
+//
 	int points_index = 0; // index into ps
 	memset(tokenStr, '\0', BUFFER_SIZE);	
 	
 	// to normalize the points
-	int total_x = 0;
-	int total_y = 0;
+	long double total_x = 0;
+	long double total_y = 0;
 	for(int i=0; i<tokens[features_index].size; i++) { // for each feature
 		while(strcmp(tokenStr, "coordinates") != 0) {
 			if(tokens[index].type == JSMN_STRING) getTokenString(index, tokenStr);
@@ -352,11 +358,14 @@ void buildTree() {
 
 		for(int j=0; j<2; j++) { // for each point; 2 points per line
 			getTokenString(index, tokenStr);
-			p.x = atof(tokenStr);
+			char* end = &tokenStr[tokens[index].size - 1]; // get a pointer to the last digit?
+			p.x = strtold(tokenStr, &end);
 			total_x += p.x;
+//			printf("str %s, p.x obtained:%.3Lf\n", tokenStr, p.x);
 //			printf("p.x string %s\n", tokenStr);	
 			getTokenString(index+1, tokenStr);
-			p.y = atof(tokenStr);
+			end = &tokenStr[tokens[index+1].size - 1]; // get a pointer to the last digit?
+			p.y = strtold(tokenStr, &end);
 			total_y += p.y;
 //			printf("p.y string %s\n", tokenStr);							
 			points_x[i*2 + j] = p; 	
@@ -399,25 +408,87 @@ void buildTree() {
 
 	double x_mean = total_x/numPoints;
 	double y_mean = total_y/numPoints;
-	printf("normalized with mean (%f,%f)\n ", x_mean, y_mean);
-	for(int i=0; i<numPoints; i++) {
-		points_x[i].x -= x_mean;
-		points_x[i].y -= y_mean;
-		printf("%i (%f, %f)\n", i, points_x[i].x, points_x[i].y);
-	}
+//	printf("normalized with mean (%f,%f)\n ", x_mean, y_mean);
+//	for(int i=0; i<numPoints; i++) {
+//		points_x[i].x -= x_mean;
+//		points_x[i].y -= y_mean;
+//		printf("%i (%.3Lf, %.3Lf) (%lu bytes)\n", i, points_x[i].x, points_x[i].y, sizeof(points_x[i].x));
+//	}
 
 	printf("Build tree! los gehts!\n");
 	buildTree_r(root, points_x, x_axis, 0, numPoints-1);
-	printf("Build done. %i nodes\n", numNodes);
+	printf("Build done. %i nodes, %i unique, %i duplicates\n", numNodes, uniquePoints, duplicates);
 	node* queue[numNodes];
 	queue[0] = root;	
 	int head = 1;
 	int tail = 0;
-	printTree(queue, &head, &tail, 1);
+//	printTree(queue, &head, &tail, 0);
 	
+	return root;	
 }
+//
+//point* findBetter(node* n, point* best, point* p) {
+//
+//	// base case
+//	if(n->p) {
+//	
+//	}
+//	
+//	// else, traverse the tree
+//	if(axis == x_axis) {
+//		if(p.x > p_node->x) findNearestPoint(n->right, p);
+//		else best = findNearestPoint(n->left, p);
+//		
+//		// check if there is any point better than best
+//		best = findBetter(n->right, best, p);		
+//
+//	} else {
+//		if(p.y > p_node->y) best = findNearestPoint(n->right, p);
+//		else best = findNearestPoint(n->left, p);
+//	}
+//
+//}
+//
+//point* findBetter(node* n, point* best, point* p) {
+//	//base case: leaf node
+//	
+//	// check if there is any point better than best
+//	if( fabsl(p->x - p->x) > fabsl(best->x - p->x)) {
+//		findBetter();
+//	}	
+//}
+//
+//point* findNearestPoint(node* n, point p) {
+//		
+//	printf("axis %i, level %i ", n->axis, n->level);
+//	if(n->p) printf("point (%.3Lf,%.3Lf)\n", n->p->x, n->p->y);
+//	else printf("split %.3Lf\n", n->split);
+//
+//	// base case: leaf node
+//	if(n->p) return n->p;
+//	
+//	axis_t axis = n->axis;
+//	point* p_node = n->p;	
+//
+//	point* best;
+//	if(axis == x_axis) {
+//		if(p.x > p_node->x) best = findNearestPoint(n->right, p);
+//		else best = findNearestPoint(n->left, p);
+//	
+//		// checks if the opposite side has a closer point	
+//		best = findBetter(n->right, best, p);	
+//	
+//	} else {
+//		if(p.y > p_node->y) best = findNearestPoint(n->right, p);
+//		else best = findNearestPoint(n->left, p);
+//	}		
+//
+//	return best;
+//}
 
 int main(int argc, char* argv[]) {
+
+	time_t start, end;
 		
 	if(argv[1]) file = argv[1];	
 	if(argc == 4) {
@@ -427,7 +498,21 @@ int main(int argc, char* argv[]) {
 
 	printf("Finding the nearest neighbor from point (%i, %i) in dataset %s\n", p[0], p[1], file);
 	parseJSON(file);
-	buildTree();
+	start = clock();
+	node* kdtree = buildTree();
+	end = clock();
+	printf("tree build in ");
+	elapsed(start, end);
 
+	point a;
+	a.x = 31.192;
+	a.y = -22.371;
+	printf("findNearestPoint() from point (%.3Lf, %.3Lf)\n", a.x, a.y);
+//	start = clock();	
+//	point*b = findNearestPoint(kdtree, a);
+//	end = clock();
+//	printf("query in ");
+//	elapsed(start, end);
+//	printf("the closest point from point (%.3Lf, %.3Lf) is (%.3Lf, %.3Lf)\n", a.x, a.y, b->x, b->y);
 	return 0;		
 }
