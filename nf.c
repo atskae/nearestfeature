@@ -1,10 +1,10 @@
-//#include <cuda_runtime.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h> 	
 #include <string.h>
 #include "jsmn.h" // JSON file parser
 #include <math.h>
+
 /*
 
 	Nearest Feature
@@ -14,18 +14,10 @@
 
 #define BUFFER_SIZE 1600000
 
-// Error handling macro
-#define CHECK(function) {															\
-	const cudaError_t error = function;												\
-	if(error != cudaSuccess) {														\
-		printf("ERROR in %s:%d\n", __FILE__, __LINE__); 							\
-		printf("error code:%d, reason %s\n", error, cudaGetErrorString(error)); 	\
-		exit(1);																	\
-	}																				\
-}
+int DIM = 0; // dimension of the coordinates
+double* ref_pt; // the point where we want to find the closest feature
 
-int p[2] = {0, 0}; // find the closest feature from this point
-char* file = "rivers-small.geojson"; // file containing coordinates of the tokenStr
+char* file; // file containing coordinates of the tokenStr
 char* jsonString; 
 jsmntok_t* tokens; 
 int numTokens = 0;
@@ -34,23 +26,10 @@ int numNodes = 0;
 int duplicates = 0; // lines overlap points so there will be duplicate points in the dataset ; duplicates are not placed into the tree
 int uniquePoints = 0;
 
-typedef struct point {
-	long double x;
-	long double y;
-} point;
-
-// stucture of arrays
-//typedef struct points {
-//	float* x;
-//	float* y;
-//} points;
-
-typedef enum axis_t {x_axis, y_axis} axis_t;
-
 typedef struct node {
-	axis_t axis; // either x_axis or y_axis
-	long double split; // the value that determines which nodes go on the left/right
-	point* p; // only contains point if this node has no children
+	int axis;
+	double split; // the value that determines which nodes go on the left/right
+	double* p; // only contains point if this node has no children
 	char visited;
 	int level;
 	struct node* left;
@@ -114,6 +93,7 @@ void parseJSON(char* file) {
 	
 	jsmn_parser parser;
 	numTokens = jsmn_parse(&parser, jsonString, strlen(jsonString), NULL, 0); // 1 token contains all the tokenStr
+	printf("%i numTokens expected.\n", numTokens);
 	tokens = (jsmntok_t*) malloc(numTokens * sizeof(jsmntok_t));
 	jsmn_init(&parser);
 
@@ -126,35 +106,13 @@ void parseJSON(char* file) {
 	free(jsonString);
 }
 
-int partition_x(point* points, int l, int r) {
+int partition(double** points, int l, int r, int dim) {
 	
 	int swap = l+1;
 	for(int i=l+1; i<=r; i++) { // iterate through all the elements except the pivot value (which is always the left-most element)
 	
-		if(points[i].x < points[l].x) { // compare the current element with the pivot ; if element is in the wrong spot, switch places 
-				point p = points[swap];
-				points[swap] = points[i];
-				points[i] = p;
-				swap++;
-		}		
-
-	}
-
-	// swap the pivot
-	point p = points[l]; // pivot value
-	points[l] = points[swap-1];
-	points[swap-1] = p;
-
-	return swap-1; // the partition point
-}
-
-int partition_y(point* points, int l, int r) {
-	
-	int swap = l+1;
-	for(int i=l+1; i<=r; i++) { // iterate through all the elements except the pivot value (which is always the left-most element)
-	
-		if(points[i].y < points[l].y) { // compare the current element with the pivot ; if element is in the wrong spot, switch places 
-			point p = points[swap];
+		if(points[i][dim] < points[l][dim]) { // compare the current element with the pivot ; if element is in the wrong spot, switch places 
+			double* p = points[swap];
 			points[swap] = points[i];
 			points[i] = p;
 			swap++;
@@ -162,22 +120,20 @@ int partition_y(point* points, int l, int r) {
 	}
 
 	// swap the pivot
-	point p = points[l]; // pivot value
+	double* p = points[l]; // pivot value
 	points[l] = points[swap-1];
 	points[swap-1] = p;
 
 	return swap-1; // the partition point
 }
 
-void quicksort(point* points, int l, int r, char dim) { 
+void quicksort(double** points, int l, int r, int dim) { 
 
 	if(l > r) return;
 
 	int sep = 0;
-
-	if(dim == 'x') sep = partition_x(points, l, r);
-	else sep = partition_y(points, l, r);
-
+	sep = partition(points, l, r, dim);
+	
 	quicksort(points, l, sep-1, dim);
 	quicksort(points, sep+1, r, dim);
 }
@@ -187,128 +143,117 @@ double max(double a, double b) {
 	else return b;
 }
 
-//typedef struct node {
-//	axis_t axis; // either x_axis or y_axis
-//	double split; // the value that determines which nodes go on the left/right
-//	point* p; // only contains point if this node has no children
-//	char visited;
-//	struct node* left;
-//	struct node* right;
-//} node;
-
 void printTree(node* queue[], int* head, int* tail, int count) {
 	
 	if(count == numNodes) return;
 
 	// take a node out of the queue
 	node* n = queue[ (*tail) ];
-	(*tail) = ((*tail) + 1)%numNodes;
+	(*tail) = ((*tail) + 1) % numNodes;
 	
 	printf("axis %i, level %i ", n->axis, n->level);
-	if(n->p) printf("point (%.3Lf,%.3Lf)\n", n->p->x, n->p->y);
-	else printf("split %.3Lf\n", n->split);
+	if(n->p) {
+		printf("point (");
+		for(int i=0; i<DIM; i++) {
+			if(i == DIM - 1) printf("%.7f)\n", n->p[i]);
+			else printf("%.7f, ", n->p[i]);
+		}
+	}
+	else printf("split %.7f\n", n->split);
 
 	// put children in queue
 	if(n->left) {
 		queue[*head] = n->left;
-		(*head)=( *head + 1)%numNodes;
+		(*head)=( *head + 1) % numNodes;
 	}
 	if(n->right) {
 		queue[*head] = n->right;
-		(*head)=( *head + 1)%numNodes;
+		(*head)=( *head + 1) % numNodes;
 	}
 
 	printTree(queue, head, tail, ++count);	
 
 }
 
-void buildTree_r(node* root, point* p_x, axis_t axis, int l, int r) { // p_x = sorted points in x_axis, p_y = sorted points in y_axis
+void buildTree_r(node* root, double** points, int axis, int l, int r) { // points = sorted points in x_axis, p_y = sorted points in y_axis
+	
+//	printf("buildTree_r l=%i, r=%i\n", l, r);
 
-	char dup = p_x[l].x == p_x[r].x && p_x[l].y == p_x[r].y && l != r; // checks if the points are duplicates
-	if(r == l || l > r || dup) { // a single point OR there are duplicate points
-		if(dup){
-			duplicates++;
-		//	printf("duplicate ");
+	char dup = 1;
+	for(int i=0; i<DIM; i++) {
+		if(points[r][i] != points[l][i]) {
+			dup = 0;
+			break;	
 		}
-	//	printf("leaf node (%.3Lf, %.3Lf)\n", p_x[r].x, p_x[r].y);
-		root->p = &p_x[r];
-		root->axis = (++axis)%2; // obtain the previous axis
+	}
+	if(r == l || l > r || dup) { // a single point OR there are duplicate points
+		if(dup) duplicates++;		
+		root->p = points[r];
+//		printf("leaf node (");
+//		for(int i=0; i<DIM; i++) {
+//			if(i == DIM - 1) printf("%.7f)\n", root->p[i]);
+//			else printf("%.7f, ", root->p[i]);
+//		}
+
+		root->axis = (axis + (DIM-1)) % DIM; // obtain the previous axis
 		root->visited = 1;
 		uniquePoints++;
-
 		return;
 	}
 	int split_index = l;
 
 	if(root->visited == 0) {	
-		//float split value;
-		long double split;
-		if(axis == x_axis) {
-			split = p_x[l].x + (p_x[r].x - p_x[l].x)/2;
-	//		printf("x-axis calculating split: %.3Lf + (%.3Lf - %.3Lf)/2\n", p_x[l].x, p_x[r].x, p_x[l].x);		
-		} else {
-			split = p_x[l].y + (p_x[r].y - p_x[l].y)/2;
-	//		printf("y-axis calculating split: %.3Lf + (%.3Lf - %.3Lf)/2\n", p_x[l].y, p_x[r].y, p_x[l].y);	
-		}
-		// either the range contains all the same nodes....? Can be merged into one node I think..
-	
-		root->split = split;
+		root->split = points[l][axis] + (points[r][axis] - points[l][axis])/2;	
 		root->axis = axis;
-		root->p = NULL;
-		root->left = NULL; // point
+		root->left = NULL; 
 		root->right = NULL;
 		root->visited = 1;
 	}
 	
 	// find the split index
-	if(axis == x_axis) {
-		for(int i=l; i<=r; i++) {
-			if(p_x[i].x > root->split) {
-				split_index = max(l, i-1);
-				break;
-			}
-		}	
-	} else {
-		for(int i=l; i<=r; i++) {
-			if(p_x[i].y > root->split) {
-				split_index = max(l, i-1);
-				break;
-			}		
+	for(int i=l; i<=r; i++) {
+		if(points[i][axis] > root->split) {
+			split_index = max(l, i-1);
+			break;
 		}
-	}
-//	printf("axis %i, l=%i, r=%i, split %.3Lf, split_index %i, level %i\n", axis, l, r, root->split, split_index, root->level);
+	}	
+
+//	printf("axis %i, l=%i, r=%i, split %.3f, split_index %i, level %i\n", axis, l, r, root->split, split_index, root->level);
 //	for(int i=0; i<numPoints; i++) {	
-//		printf("%i: (%f, %f)\n", i, p_x[i].x, p_x[i].y);
+//		printf("%i: (%f, %f)\n", i, points[i].x, points[i].y);
 //	}
 //
 	node* n_l;
 	if(!root->left) {
 		n_l = (node*) malloc(sizeof(node));
 		n_l->visited = 0;
+		n_l->p = NULL;
+		n_l->level = root->level + 1;
 		root->left = n_l;
-		root->left->level = root->level + 1;
 		numNodes++;
 	} else {
 		printf("This should never happen\n");
-	}	
+	}
+	
 	// sort all the values to the left of split index
-	if(axis == x_axis) quicksort(p_x, l, split_index, 'y'); // sort in the opposite direction
-	else quicksort(p_x, l, split_index, 'x');
-//	printf("axis %i l=%i, r=%i split %.3Lf, visiting empty left node next\n", root->axis, l, r, root->split);
-	buildTree_r(root->left, p_x, (axis+1)%2, l, split_index);	
+	quicksort(points, l, split_index, (axis+1)%DIM); // sort in the next axis 
+	buildTree_r(root->left, points, (axis+1)%DIM, l, split_index);	
 
 	node* n_r;
 	if(!root->right) {
 		n_r = (node*) malloc(sizeof(node));
 		n_r->visited = 0;
+		n_r->p = NULL;
+		n_r->level = root->level + 1;
 		root->right = n_r;
-		root->right->level = root->level + 1;
 		numNodes++;
+	} else {
+		printf("This should also never happen...\n");
 	}
-	if(axis == x_axis) quicksort(p_x, split_index+1, r, 'y'); // sort in the opposite direction
-	else quicksort(p_x, split_index+1, r, 'x');
-//	printf("axis %i l=%i, r=%i split %.3Lf, visiting empty right node next\n", root->axis, l, r, root->split);
-	buildTree_r(root->right, p_x, (axis+1)%2, split_index+1, r);			
+	// sort all the values the right of the split index
+	quicksort(points, split_index+1, r, (axis+1)%DIM); // sort in the next axis 
+	buildTree_r(root->right, points, (axis+1)%DIM, split_index+1, r);	
+	
 }
 
 node* buildTree() {
@@ -316,7 +261,8 @@ node* buildTree() {
 	printf("buildTree()\n");
 	char tokenStr[BUFFER_SIZE];
 	int features_index = 0; // the index into the token array
-	
+
+	// obtain the index into the tokens array where the features start	
 	for(int i=1; i<numTokens; i++) { 
 		if(tokens[i].type == JSMN_ARRAY && (tokens[i-1].end - tokens[i-1].start) == 8 && jsonString[ tokens[i-1].start ] == 'f') {	
 			getTokenString(i-1, tokenStr);
@@ -329,156 +275,93 @@ node* buildTree() {
 
 	int index = features_index;
 	numPoints = tokens[features_index].size * 2; // each feature has 2 points
-	point* points_x = (point*) malloc(numPoints * sizeof(point));
+	double** points = (double**) malloc(numPoints*DIM * sizeof(double*));
+	int p_index = 0; // index into points
 	printf("%d features\n", tokens[features_index].size);
-	
-	// structure of arrays
-	// sorted by x coordinate
-//	points ps_x;
-//	ps_x.x = (double*) malloc(numPoints * sizeof(double));
-//	ps_x.y = (double*) malloc(numPoints * sizeof(double));
-//	// sorted by y coordinate	
-//	points ps_y;
-//	ps_y.x = (double*) malloc(numPoints * sizeof(double));
-//	ps_y.y = (double*) malloc(numPoints * sizeof(double));
-//
-	int points_index = 0; // index into ps
 	memset(tokenStr, '\0', BUFFER_SIZE);	
-	
-	// to normalize the points
-	long double total_x = 0;
-	long double total_y = 0;
+
+	int pp_f = 0; // points per feature ; 2 for lines, 1 for points
 	for(int i=0; i<tokens[features_index].size; i++) { // for each feature
 		while(strcmp(tokenStr, "coordinates") != 0) {
 			if(tokens[index].type == JSMN_STRING) getTokenString(index, tokenStr);
 			index++;
 		}
+		getTokenString(index-2, tokenStr);
+//		printf("type %s\n", tokenStr);
+		if(strstr(tokenStr, "Line") != NULL) pp_f = 2; // points per feature
+		else pp_f = 1;
+	
 		index+=3; // goes to the token where the x-coordinate starts
-		point p;
-
-		for(int j=0; j<2; j++) { // for each point; 2 points per line
-			getTokenString(index, tokenStr);
-			char* end = &tokenStr[tokens[index].size - 1]; // get a pointer to the last digit?
-			p.x = strtold(tokenStr, &end);
-			total_x += p.x;
-//			printf("str %s, p.x obtained:%.3Lf\n", tokenStr, p.x);
-//			printf("p.x string %s\n", tokenStr);	
-			getTokenString(index+1, tokenStr);
-			end = &tokenStr[tokens[index+1].size - 1]; // get a pointer to the last digit?
-			p.y = strtold(tokenStr, &end);
-			total_y += p.y;
-//			printf("p.y string %s\n", tokenStr);							
-			points_x[i*2 + j] = p; 	
-			index+=3; // move three tokens ahead to get to next point
-			
-		//	points_index++;
-		}		
-	}
-
-	printf("%i points in dataset\n", numPoints);	
+		char* end;
 	
-	point* points_y = (point*) malloc(numPoints * sizeof(point));
-	points_y = memcpy(points_y, points_x, sizeof(point)*numPoints);	
-	if(!points_y) {
-		printf("points_y malloc failed\n");
-		exit(1);
+		for(int j=0; j<pp_f; j++) { // for each point in the feature
+			points[p_index] = malloc(DIM * sizeof(double));
+	
+			for(int k=0; k<DIM; k++) { 
+				getTokenString(index+k, tokenStr);
+				end = &tokenStr[tokens[index+k].size - 1]; // get a pointer to the last digit
+				points[p_index][k] = strtod(tokenStr, &end); // convert to a double
+			}
+			index+=3; // move three tokens ahead to get to next point	
+			p_index++;
+		}	
 	}
 
-	quicksort(points_x, 0, numPoints-1, 'x');
-	quicksort(points_y, 0, numPoints-1, 'y');	
-
-//	memcpy(ps_y.x, ps_x.x, numPoints*sizeof(float));
-//	memcpy(ps_y.y, ps_x.y, numPoints*sizeof(float));
+	quicksort(points, 0, numPoints-1, 0);
+//	printf("%i points in dataset\n", numPoints);	
+//	printf("sorted:\n");
+//	for(int i=0; i<numPoints; i++) {
+//		double* p = points[i];
+//		printf("(");
+//		for(int j=0; j<DIM; j++) {
+//			if(j == DIM - 1) printf("%.7f)\n", p[j]); 
+//			else printf("%.7f, ", p[j]);
+//		}
+//	}
 //
-//	quicksort_p(ps_x, 0, numPoints, 'x');
-//	quicksort_p(ps_y, 0, numPoints, 'y');
-	
-//	typedef struct node {
-//		axis_t axis; // either x_axis or y_axis
-//		float split; // the value that determines which nodes go on the left/right
-//		point p*; // only contains point if this node has no children
-//		struct node* left;
-//		struct node* right;
-//	} node;
-	
 	node* root = (node*) malloc(sizeof(node));	
+	root->p = NULL;
 	root->visited = 0;
 	root->level = 0;
 	numNodes++;
 
-	double x_mean = total_x/numPoints;
-	double y_mean = total_y/numPoints;
-//	printf("normalized with mean (%f,%f)\n ", x_mean, y_mean);
-//	for(int i=0; i<numPoints; i++) {
-//		points_x[i].x -= x_mean;
-//		points_x[i].y -= y_mean;
-//		printf("%i (%.3Lf, %.3Lf) (%lu bytes)\n", i, points_x[i].x, points_x[i].y, sizeof(points_x[i].x));
-//	}
-
 	printf("Build tree! los gehts!\n");
-	buildTree_r(root, points_x, x_axis, 0, numPoints-1);
-	printf("Build done. %i nodes, %i unique, %i duplicates\n", numNodes, uniquePoints, duplicates);
-	node* queue[numNodes];
-	queue[0] = root;	
-	int head = 1;
-	int tail = 0;
+	buildTree_r(root, points, 0, 0, numPoints-1);
+	printf("Build done. %i points, %i nodes, %i unique, %i duplicates\n", numPoints, numNodes, uniquePoints, duplicates);
+//	node* queue[numNodes];
+//	queue[0] = root;	
+//	int head = 1;
+//	int tail = 0;
 //	printTree(queue, &head, &tail, 0);
 	
 	return root;	
 }
-//
-//point* findBetter(node* n, point* best, point* p) {
-//
-//	// base case
-//	if(n->p) {
-//	
-//	}
-//	
-//	// else, traverse the tree
-//	if(axis == x_axis) {
-//		if(p.x > p_node->x) findNearestPoint(n->right, p);
-//		else best = findNearestPoint(n->left, p);
-//		
-//		// check if there is any point better than best
-//		best = findBetter(n->right, best, p);		
-//
-//	} else {
-//		if(p.y > p_node->y) best = findNearestPoint(n->right, p);
-//		else best = findNearestPoint(n->left, p);
-//	}
-//
-//}
-//
-//point* findBetter(node* n, point* best, point* p) {
-//	//base case: leaf node
-//	
-//	// check if there is any point better than best
-//	if( fabsl(p->x - p->x) > fabsl(best->x - p->x)) {
-//		findBetter();
-//	}	
-//}
-//
+
 //point* findNearestPoint(node* n, point p) {
 //		
 //	printf("axis %i, level %i ", n->axis, n->level);
-//	if(n->p) printf("point (%.3Lf,%.3Lf)\n", n->p->x, n->p->y);
-//	else printf("split %.3Lf\n", n->split);
+//	if(n->p) printf("point (%.3f,%.3f)\n", n->p->x, n->p->y);
+//	else printf("split %.3f\n", n->split);
 //
 //	// base case: leaf node
 //	if(n->p) return n->p;
 //	
-//	axis_t axis = n->axis;
+//	int axis = n->axis;
 //	point* p_node = n->p;	
 //
 //	point* best;
-//	if(axis == x_axis) {
-//		if(p.x > p_node->x) best = findNearestPoint(n->right, p);
-//		else best = findNearestPoint(n->left, p);
-//	
-//		// checks if the opposite side has a closer point	
-//		best = findBetter(n->right, best, p);	
-//	
-//	} else {
+//	if(axis == x_axis) { // x-axis
+//		if(p.x > p_node->x) { // go to the right side
+//			best = findNearestPoint(n->right, p);
+//			// check if the left side has potential closer points			if(p_node->x < best->x) best = findBetter(n, best, p);
+//			else return best;		
+//
+//		} else { // go to the left side
+//			best = findNearestPoint(n->left, p);
+//			// check if the right side has potential closer points			if(p->node->x < best->x) best = findBetter(n, best, p);
+//			else return best;
+//		}
+//	} else { // y axis
 //		if(p.y > p_node->y) best = findNearestPoint(n->right, p);
 //		else best = findNearestPoint(n->left, p);
 //	}		
@@ -488,31 +371,53 @@ node* buildTree() {
 
 int main(int argc, char* argv[]) {
 
-	time_t start, end;
-		
-	if(argv[1]) file = argv[1];	
-	if(argc == 4) {
-		p[0] = atoi(argv[2]); // x-coordinate
-		p[1] = atoi(argv[3]); // y coordinate
+	time_t start, end;	
+	if(argc < 3) {
+		printf("./nf <filename> <dimension n> <d1> ... <dn>\n");
+		return 1;
 	}
-
-	printf("Finding the nearest neighbor from point (%i, %i) in dataset %s\n", p[0], p[1], file);
+	
+	file = argv[1]; // file name	
+	printf("filename: %s\n", file);
+	DIM = atoi(argv[2]);
+	if(DIM > 3 || DIM < 1) {
+		printf("Dimension must be between 1-3.\n");
+		return 1;
+	}
+	if(argc != 3 + DIM) {
+		printf("Did not provide a %i dimension coordinate.\n", DIM);
+		return 1;
+	}
+	
+	ref_pt = malloc(DIM * sizeof(double));
+	for(int i=0; i<DIM; i++) {
+		ref_pt[i] = (double)rand()/(double)(RAND_MAX/100);
+	}
+//	// scanf messes this part up.... figure out the issue
+//	printf("Finding the nearest neighbor from point (");
+//	for(int i=0; i<DIM; i++) {
+//	//	p[i] = strtod(argv[3+i], strlen(argv[3+i]));
+//		if(i == DIM-1) printf("%f)\n", p[i]);
+//		else printf("%f, ", p[i]);
+//	}
+ 
 	parseJSON(file);
+	printf("Ready to build tree\n");
 	start = clock();
 	node* kdtree = buildTree();
 	end = clock();
 	printf("tree build in ");
 	elapsed(start, end);
 
-	point a;
-	a.x = 31.192;
-	a.y = -22.371;
-	printf("findNearestPoint() from point (%.3Lf, %.3Lf)\n", a.x, a.y);
+	double a[3];
+	a[0] = 31.192;
+	a[1] = -22.371;
+	a[2] = 10.223;
 //	start = clock();	
 //	point*b = findNearestPoint(kdtree, a);
 //	end = clock();
 //	printf("query in ");
 //	elapsed(start, end);
-//	printf("the closest point from point (%.3Lf, %.3Lf) is (%.3Lf, %.3Lf)\n", a.x, a.y, b->x, b->y);
+//	printf("the closest point from point (%.3f, %.3f) is (%.3f, %.3f)\n", a.x, a.y, b->x, b->y);
 	return 0;		
 }
