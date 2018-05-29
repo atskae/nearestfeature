@@ -143,6 +143,14 @@ double max(double a, double b) {
 	else return b;
 }
 
+void printPoint(double* p) {
+	printf("(");
+	for(int i=0; i<DIM; i++) {
+		if(i == DIM - 1) printf("%.5f)\n", p[i]);
+		else printf("%.5f, ", p[i]);
+	}
+}
+
 void printTree(node* queue[], int* head, int* tail, int count) {
 	
 	if(count == numNodes) return;
@@ -181,7 +189,7 @@ void buildTree_r(node* root, double** points, int axis, int l, int r) { // point
 
 	char dup = 1;
 	for(int i=0; i<DIM; i++) {
-		if(points[r][i] != points[l][i]) {
+		if(points[r][i] != points[l][i]) { // don't compare floating point like this!!!!! fix
 			dup = 0;
 			break;	
 		}
@@ -328,46 +336,78 @@ node* buildTree() {
 	printf("Build tree! los gehts!\n");
 	buildTree_r(root, points, 0, 0, numPoints-1);
 	printf("Build done. %i points, %i nodes, %i unique, %i duplicates\n", numPoints, numNodes, uniquePoints, duplicates);
-//	node* queue[numNodes];
-//	queue[0] = root;	
-//	int head = 1;
-//	int tail = 0;
-//	printTree(queue, &head, &tail, 0);
+	node* queue[numNodes];
+	queue[0] = root;	
+	int head = 1;
+	int tail = 0;
+	printTree(queue, &head, &tail, 0);
 	
 	return root;	
 }
 
-//point* findNearestPoint(node* n, point p) {
-//		
+void findBetter(node* n, double* p, double** best) {
+
+//	printf("findBetter() --- \n");	
+	// calcualate distance to the current node, which can either be a point or a split
+	char is_pt = 0; // if this node is a leaf node, we can simply return it if is the best
+	double sum = 0;
+	double dist = 0;
+//	printf("current node: ");
+	if(n->p) {
+		is_pt = 1;
+		for(int i=0; i<DIM; i++) {
+			sum += pow((p[i] - n->p[i]), 2);
+		}
+		dist = sqrt(sum);
+//		printPoint(n->p);
+	} else {
+		// calculate distance to split line
+		sum = pow((p[n->axis] - n->split), 2);
+		dist = sqrt(sum);
+//		printf("split %.3f\n", n->split);	
+	}
+//	printf("dist from point p to current node = %.3f\n", dist);	
+
+	// calculate the distance of best
+	sum = 0;
+	for(int i=0; i<DIM; i++) {
+		sum += pow((p[i] - (*best)[i]), 2);
+	}
+	double dist_best = sqrt(sum);
+	//printf("current best; ");
+//	printPoint(*best); 
+//	printf("dist to best = %.3f\n", dist_best);
+
+	if(dist < dist_best) {
+		if(is_pt) {
+			*best =  n->p; // return the point
+			return;
+		}
+		// explore the other side of the split line
+		if(p[n->axis] > n->split) findBetter(n->left, p, best); // explore the other half of tree
+		else findBetter(n->right, p, best); 
+	}
+}
+
+double* findNearestPoint(node* n, double* p) {
+
+//	printf("findNearestNeighbor()\n");		
 //	printf("axis %i, level %i ", n->axis, n->level);
-//	if(n->p) printf("point (%.3f,%.3f)\n", n->p->x, n->p->y);
+//	if(n->p) printPoint(n->p);
 //	else printf("split %.3f\n", n->split);
-//
-//	// base case: leaf node
-//	if(n->p) return n->p;
-//	
-//	int axis = n->axis;
-//	point* p_node = n->p;	
-//
-//	point* best;
-//	if(axis == x_axis) { // x-axis
-//		if(p.x > p_node->x) { // go to the right side
-//			best = findNearestPoint(n->right, p);
-//			// check if the left side has potential closer points			if(p_node->x < best->x) best = findBetter(n, best, p);
-//			else return best;		
-//
-//		} else { // go to the left side
-//			best = findNearestPoint(n->left, p);
-//			// check if the right side has potential closer points			if(p->node->x < best->x) best = findBetter(n, best, p);
-//			else return best;
-//		}
-//	} else { // y axis
-//		if(p.y > p_node->y) best = findNearestPoint(n->right, p);
-//		else best = findNearestPoint(n->left, p);
-//	}		
-//
-//	return best;
-//}
+
+	// base case: leaf node
+	if(n->p) return n->p;
+	
+	int axis = n->axis;
+	double* best;
+	if(p[n->axis] > n->split) best = findNearestPoint(n->right, p);	
+	else best = findNearestPoint(n->left, p);
+
+	findBetter(n, p, &best); // looks for a closer point, if not found, best remains the same; sets best
+	
+	return best;
+}
 
 int main(int argc, char* argv[]) {
 
@@ -410,14 +450,19 @@ int main(int argc, char* argv[]) {
 	elapsed(start, end);
 
 	double a[3];
-	a[0] = 31.192;
-	a[1] = -22.371;
-	a[2] = 10.223;
-//	start = clock();	
-//	point*b = findNearestPoint(kdtree, a);
-//	end = clock();
-//	printf("query in ");
-//	elapsed(start, end);
-//	printf("the closest point from point (%.3f, %.3f) is (%.3f, %.3f)\n", a.x, a.y, b->x, b->y);
+	for(int i=0; i<DIM; i++) {
+		a[i] = atof(argv[3+i]);
+	}
+	printf("Starting nearest point search\n");
+	start = clock();	
+	double* b = findNearestPoint(kdtree, a);
+	end = clock();
+	printf("query in ");
+	elapsed(start, end);
+	printf("the closest point from point from ");
+	printPoint(a);
+	printf("is ");
+	printPoint(b);
+
 	return 0;		
 }
