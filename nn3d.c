@@ -16,7 +16,7 @@
 #define PI 3.14159265358979323846
 #define EARTH_RADIUS 6371 // in km
 
-int DIM = 3; // dimension of the coordinates
+#define DIM 3 // dimension of cartesian coordinates
 
 char* file; // file containing coordinates of the tokenStr
 char* jsonString; 
@@ -24,7 +24,6 @@ jsmntok_t* tokens;
 int numTokens = 0;
 int numPoints = 0;
 int numNodes = 0;
-int uniquePoints = 0;
 
 double** points = NULL;
 double** geopoints = NULL;
@@ -240,53 +239,27 @@ void buildTree_r(node* root, int axis, int l, int r) { // points = sorted points
 	
 //	printf("buildTree_r l=%i, r=%i\n", l, r);
 
-	//char dup = 1;
-	//for(int i=0; i<DIM; i++) {
-	//	if( points[r][i] - points[l][i] > 1e-15) { // must compare floats like this.... 
-	//		dup = 0;
-	//		break;	
-	//	}
-	//}
-	if(r == l || l > r) { // a single point OR there are duplicate points
+	if(r == l || l > r || r-l == 0) {
+		printf("level %i leaf: ", root->level);
+		printPoint(points[r]); 
 		root->p = r;
-//		printf("leaf node (");
-//		for(int i=0; i<DIM; i++) {
-//			if(i == DIM - 1) printf("%.7f)\n", root->p[i]);
-//			else printf("%.7f, ", root->p[i]);
-//		}
-
 		root->axis = (axis + (DIM-1)) % DIM; // obtain the previous axis
 		root->visited = 1;
-		uniquePoints++;
 		return;
 	}
 	
-	int split_index = l + (r-l)/2;
+	int split_index = l + (r-l)/2; // median index
 
 	if(root->visited == 0) {	
-		//root->split = points[l][axis] + (points[r][axis] - points[l][axis])/2;	
-		if(((r-l)+1)%2) root->split = (points[split_index][axis] + points[split_index][axis])/2; // even number of elements
+		if(((r-l)+1)%2 == 0) root->split = (points[split_index][axis] + points[split_index+1][axis])/2; // even number of elements
 		else root->split = points[split_index][axis]; // odd number of elments; clear median
-		//root->split = points[split_index][axis];
 		root->axis = axis;	
 		root->left = NULL; 
 		root->right = NULL;
 		root->visited = 1;
+		printf("level %i, split node: %.12f\n", root->level,root->split);
 	}
 	
-	// find the split index
-	//for(int i=l; i<=r; i++) {
-	//	if(points[i][axis] > root->split) {
-	//		split_index = max(l, i-1);
-	//		break;
-	//	}
-	//}	
-
-//	printf("axis %i, l=%i, r=%i, split %.3f, split_index %i, level %i\n", axis, l, r, root->split, split_index, root->level);
-//	for(int i=0; i<numPoints; i++) {	
-//		printf("%i: (%f, %f)\n", i, points[i].x, points[i].y);
-//	}
-//
 	node* n_l;
 	if(!root->left) {
 		n_l = (node*) malloc(sizeof(node));
@@ -370,18 +343,12 @@ node* buildTree() {
 			getTokenString(index+1, tokenStr);
 			end = &tokenStr[tokens[index+1].size - 1]; // get pointer to the last digit
 			lat = getRadians( strtod(tokenStr, &end) ); // save latitude value at index 0
-			
-			printf("processing: %.12f, %.12f\n", longt, lat);
-			/*
-				x = r * cos(latitude) * cos(longitude);
-				y = r * cos(latitude) * sin(longitude);
-				z = r * sin(latitude);
-			*/
+		
 			char dup = 0;
 			// see if this point has already been seen
 			for(int k=0; k<p_index; k++) {
 				if(geopoints[k][0] - lat < 1e-32 && geopoints[k][1] - longt < 1e-32) {
-					printf("%.12f, %.12f is already in the list\n", longt, lat);
+	//				printf("%.12f, %.12f is already in the list\n", longt, lat);
 					dup = 1;
 					break;
 				}	
@@ -431,7 +398,7 @@ node* buildTree() {
 
 	printf("Build tree! los gehts!\n");
 	buildTree_r(root, 0, 0, numPoints-1);
-	printf("Build done. %i points, %i nodes, %i unique, %i duplicates\n", numPoints, numNodes, uniquePoints, numPoints - uniquePoints);
+	printf("Build done. %i points, %i nodes\n", numPoints, numNodes);
 	node* queue[numNodes];
 	queue[0] = root;	
 	int head = 1;
@@ -441,9 +408,17 @@ node* buildTree() {
 	return root;	
 }
 
+void printNode(node* n) {
+	printf("level %i, ", n->level);
+	if(n->p == -1) printf("split %.12f\n", n->split);
+	else printPoint(points[n->p]);
+}
+
 void findBetter(node* n, double* p, int* best) {
 
-	printf("best %i\n", *best);
+//	printf("best %i, current node: ", *best);
+//	printNode(n);
+//
 	double dist = 0;
 	if(!n->left && !n->right) dist = distance(p, points[n->p]); // leaf node; is a point
 	else dist = p_to_line(p, n->split, n->axis); // a split node; is a line
@@ -454,22 +429,22 @@ void findBetter(node* n, double* p, int* best) {
 
 		if(!n->left && !n->right) { // is a leaf node
 			*best = n->p;
-			printf("best distance %.12f at point ", dist);
-			printPoint(points[*best]);
+//			printf("best distance %.12f at point ", dist);
+//			printPoint(points[*best]);
 			return;
 		}
 		// explore the other side of the split line
-		if(p[n->axis] > n->split) findBetter(n->left, p, best); // explore the other half of tree
-		else findBetter(n->right, p, best); 
+		findBetter(n->left, p, best); // explore the other half of tree
+		findBetter(n->right, p, best); 
 	}
 }
 
 int findNearestPoint(node* n, double* p) {
 
-//	printf("findNearestNeighbor()\n");		
-//	printf("axis %i, level %i ", n->axis, n->level);
-//	if(!n->left && !n->right) printPoint(n->p);
-//	else printf("split %.3f\n", n->split);
+	//printf("findNearestNeighbor()\n");		
+	//printf("axis %i, level %i ", n->axis, n->level);
+	//if(!n->left && !n->right) printPoint(points[n->p]);
+	//else printf("split %.3f\n", n->split);
 
 	// base case: leaf node
 	if(!n->left && !n->right) return n->p;
@@ -485,9 +460,8 @@ int findNearestPoint(node* n, double* p) {
 
 int main(int argc, char* argv[]) {
 
-	printf("Finds the nearest point...\n");
 	time_t start, end;	
-	if(argc < 5) {
+	if(argc < 4) {
 		printf("./nf <filename> <latitude> <longitude> <max distance>\n");
 		return 1;
 	}
@@ -501,16 +475,22 @@ int main(int argc, char* argv[]) {
 	printf("tree build in ");
 	elapsed(start, end);
 
-	double lat, longt;	
-	lat  = getRadians( atof(argv[2]) ); // lat
-	longt = getRadians( atof(argv[3]) ); // longt
+	double lat, longt;
+	lat = atof(argv[2]); // lat
+	longt = atof(argv[3]); // longt
+	printf("(lat=%.12f, longt=%.12f) to cartesian: ", lat, longt);
+	
+	lat = getRadians(lat);
+	longt = getRadians(longt);
+
 	double* a = malloc(DIM * sizeof(double));
 	a[0] = EARTH_RADIUS * cos(lat) * cos(longt); // x
-	a[1] = EARTH_RADIUS * cos(lat) * sin(longt);
-	a[2] = EARTH_RADIUS * sin(lat);
-	printf("(lat=%.12f, longt=%.12f) to cartesian: (%.12f, %.12f, %.12f)\n", lat, longt, a[0], a[1], a[2]);
+	a[1] = EARTH_RADIUS * cos(lat) * sin(longt); // y
+	a[2] = EARTH_RADIUS * sin(lat); // z
+	printf("(%.12f, %.12f, %.12f)\n", a[0], a[1], a[2]);
 	
-	double max_distance = atof(argv[4]);
+	double range = DBL_MAX;
+	if(argv[4]) range = atof(argv[4]);
 
 	printf("Starting nearest point search\n");
 	start = clock();	
@@ -519,8 +499,8 @@ int main(int argc, char* argv[]) {
 	printf("query in ");
 	elapsed(start, end);
 	double dist = distance(points[b], a);
-	if(dist > max_distance) {
-		printf("0 points were found within the range %.5f\n", max_distance);
+	if(dist > range) {
+		printf("0 points were found within the range %.5f\n", range);
 	} else {
 		printf("the closest point from point from ");
 		printPoint(a);
@@ -543,6 +523,7 @@ int main(int argc, char* argv[]) {
 	end = clock();
 
 	printf("index %i, brute force distance: %.12f\n", min_index, min_dist);
+	printPoint(points[min_index]);
 	elapsed(start, end);
 	return 0;		
 }
