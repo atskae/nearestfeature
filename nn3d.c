@@ -2,26 +2,24 @@
 #include <stdio.h>
 #include <time.h> 	
 #include <string.h>
-#include "jsmn.h" // JSON file parser
-#include <math.h>
 #include <float.h> // max double value 
-/*
+#include <math.h>
 
+#include "jsmn.h" // JSON file parser
+
+
+/*
 	Nearest Feature
 	Given a dataset of tokenStr and a given point p, find the closest feature from p
-
 */
 
 #define BUFFER_SIZE 1600000
+#define POINTS_BUFFER_SIZE 100000 // the number of points to allocate at once ; arbitrary
 #define PI 3.14159265358979323846
 #define EARTH_RADIUS 6371 // in km
 
 #define DIM 3 // dimension of cartesian coordinates
 
-char* file; // file containing coordinates of the tokenStr
-char* jsonString; 
-jsmntok_t* tokens; 
-int numTokens = 0;
 int numPoints = 0;
 int numNodes = 0;
 
@@ -86,18 +84,19 @@ double haversine(double* a, double* b) {
 	return fabs(p[axis] - split);
 }
 
-void getTokenString(int index, char* ptr) {
-	jsmntok_t t = tokens[index];
-	int strPtr = 0;
+void getTokenString(jsmntok_t* tokens, int token_idx,  char* json_str, char* dest) {
+	
+	jsmntok_t t = tokens[token_idx];
+	int ptr = 0;
 
 	for(int i=t.start; i<t.end; i++) {
-		ptr[strPtr] = jsonString[i];
-		strPtr++;
+		dest[ptr] = json_str[i];
+		ptr++;
 	}
-	ptr[strPtr] = '\0';
+	dest[ptr] = '\0';
 }
 
-void printToken(int index) {
+void printToken(jsmntok_t* tokens, int index, char* jsonString) {
 	jsmntok_t t = tokens[index];
 	// add a nicer switch statement to print the type of token	
 	printf("-----\nTOKEN %i: type %i, start %i, end %i, size %i, ", index, t.type, t.start, t.end, t.size);
@@ -105,65 +104,6 @@ void printToken(int index) {
 		printf("%c", jsonString[i]);
 	}
 	printf("\n-----\n");
-}
-
-void parseJSON(char* file) {
-
-	//printf("parseJSON() will parse %s\n", file);
-
-	jsonString = (char*) malloc(BUFFER_SIZE);
-	// obtain the JSON string
-    FILE *f;
-    char c;
-    int index = 0;
-    f = fopen(file, "rt");
-	if(!f) {
-		printf("Failed to open file %s\n", file);
-		exit(1);
-	}
-    while((c = fgetc(f)) != EOF){
-        jsonString[index] = c;
-        index++;
-		if(index == BUFFER_SIZE) {
-			jsonString = realloc(jsonString, index+BUFFER_SIZE); // allocates more memory
-		}    
-	}
-	fclose(f);
-
-    jsonString[index] = '\0';
-	index++; // index saves the size of file (in bytes) for now
-	jsonString = realloc(jsonString, index); // adjusts buffer size
-//	printf("%i bytes\n", index);
-//	printf("length of JSON string %lu\n", strlen(jsonString));	
-	jsmn_parser parser;
-	jsmn_init(&parser);
-
-	numTokens = jsmn_parse(&parser, jsonString, strlen(jsonString), NULL, 0); 
-//	printf("%i numTokens expected.\n", numTokens);
-	tokens = (jsmntok_t*) malloc(numTokens * sizeof(jsmntok_t));
-
-	jsmn_init(&parser); // restart parser???	
- 	numTokens = jsmn_parse(&parser, jsonString, strlen(jsonString), tokens, numTokens); // 1 token contains all the tokenStr
-	if(numTokens < 0) {
-		printf("Failed to parse JSON file: ");
-		switch(numTokens) {
-			case JSMN_ERROR_INVAL:
-				printf("JSON string is corrupted.\n");
-				break;
-			case JSMN_ERROR_NOMEM:
-				printf("not enough tokens.\n");
-				break;
-			case JSMN_ERROR_PART:
-				printf("JSON string is too short. Expecting more JSON data.\n");
-				break;	
-			default: printf("error unknown.\n");
-				break;
-		}
-		exit(1);
-	}
-	// else printf("%i tokens parsed.\n", numTokens);
-	
-	free(jsonString);
 }
 
 int partition(double** points, int l, int r, int dim) {
@@ -198,6 +138,193 @@ void quicksort(double** points, int l, int r, int dim) {
 	quicksort(points, sep+1, r, dim);
 }
 
+
+void parseJSON(char* file) {
+
+    FILE *f;
+    char c;
+    int index = 0;
+	char* jsonString = (char*) malloc(BUFFER_SIZE);
+    f = fopen(file, "rt");
+	if(!f) {
+		printf("Failed to open file %s\n", file);
+		exit(1);
+	}
+    while((c = fgetc(f)) != EOF){
+        jsonString[index] = c;
+        index++;
+		if(index % BUFFER_SIZE == 0) {
+			jsonString = realloc(jsonString, index+BUFFER_SIZE); // allocates more memory
+		}    
+	}
+	fclose(f);
+    jsonString[index] = '\0';
+	index++; 
+	jsonString = realloc(jsonString, index); // adjusts buffer size
+	
+	jsmn_parser parser;
+	jsmn_init(&parser);
+	int numTokens = jsmn_parse(&parser, jsonString, strlen(jsonString), NULL, 0); 
+
+	jsmntok_t* tokens = (jsmntok_t*) malloc(numTokens * sizeof(jsmntok_t));
+	jsmn_init(&parser); // restart parser	
+ 	numTokens = jsmn_parse(&parser, jsonString, strlen(jsonString), tokens, numTokens); 
+	if(numTokens < 0) {
+		printf("Failed to parse JSON file: ");
+		switch(numTokens) {
+			case JSMN_ERROR_INVAL:
+				printf("JSON string is corrupted.\n");
+				break;
+			case JSMN_ERROR_NOMEM:
+				printf("not enough tokens.\n");
+				break;
+			case JSMN_ERROR_PART:
+				printf("JSON string is too short. Expecting more JSON data.\n");
+				break;	
+			default: printf("error unknown.\n");
+				break;
+		}
+		exit(1);
+	}
+	// else printf("%i tokens parsed.\n", numTokens);
+	
+	
+	char tokenStr[BUFFER_SIZE];
+	int numFeatures = 0;
+
+	// must parse according to geometry type: Point, LineString, Polygon, MultiPoint, MultiLineString, MutliPolygon 
+	//https://en.wikipedia.org/wiki/GeoJSON
+
+	// obtain the index into the tokens array where the features start	
+	for(int i=1; i<numTokens; i++) { 
+		if(tokens[i].type == JSMN_ARRAY && (tokens[i-1].end - tokens[i-1].start) == 8 && jsonString[ tokens[i-1].start ] == 'f') {	
+			getTokenString(tokens, i-1, jsonString, tokenStr); 
+			if(strcmp(tokenStr, "features") == 0) {
+				numFeatures = tokens[i].size;
+				index = i;
+				break;
+			}
+		}
+	}
+
+	points = (double**) malloc(POINTS_BUFFER_SIZE * sizeof(double*));
+	geopoints = (double**) malloc(POINTS_BUFFER_SIZE * sizeof(double*));
+	int numPoints = 0; // index into points
+	printf("Getting %i features\n", numFeatures);
+
+	for(int i=0; i<numFeatures; i++) {
+		while(strcmp(tokenStr, "coordinates") != 0) {
+			index++;
+			if(tokens[index].type == JSMN_STRING) getTokenString(tokens, index, jsonString, tokenStr);
+		}
+		
+		while(tokens[index].type != JSMN_PRIMITIVE) {
+			index++;
+		}
+
+		char* end;
+		double lat, longt;
+
+		char goto_next_feat = 0;
+		while(!goto_next_feat && index != numTokens) { // get all points in this feature	
+		
+			// extracts the longtitude
+			getTokenString(tokens, index, jsonString, tokenStr);
+			end = &tokenStr[tokens[index].size - 1]; // get a pointer to the last digit
+			longt = strtod(tokenStr, &end); 
+//			printf("|longt = %s| is primitive: %i\n", tokenStr, tokens[index].type == JSMN_PRIMITIVE);			
+			
+			index++;
+ 
+			// extract the latitude
+			getTokenString(tokens, index, jsonString, tokenStr);
+			end = &tokenStr[tokens[index].size - 1]; // get pointer to the last digit
+			lat = strtod(tokenStr, &end); // save latitude value at index 0
+//			printf("|lat= %s| is primitive: %i\n", tokenStr, tokens[index].type == JSMN_PRIMITIVE);			
+
+			index++;
+
+//			for(int m=index; m<index+10; m++) {
+//				getTokenString(tokens, m, jsonString, tokenStr);
+//				printf("%s is primitive? %i\n", tokenStr, tokens[m].type == JSMN_PRIMITIVE);
+//			}
+	
+			// see if this point has already been seen
+			char dup = 0;
+			for(int k=0; k<numPoints; k++) {
+				if(geopoints[k][0] - lat < 1e-32 && geopoints[k][1] - longt < 1e-32) {
+	//				printf("%.12f, %.12f is already in the list\n", longt, lat);
+					dup = 1;
+					break;
+				}	
+			}
+
+			if(!dup) {
+				points[numPoints] = malloc(DIM * sizeof(double));
+				geopoints[numPoints] = malloc(2 * sizeof(double));
+
+				// save the geo coordinates	
+				geopoints[numPoints][0] = lat;
+				geopoints[numPoints][1] = longt;
+			
+				lat = getRadians(lat);
+				longt = getRadians(longt);	
+				// convert (lat, long) to (x,y,z)
+				points[numPoints][0] = EARTH_RADIUS * cos(lat) * cos(longt); // x
+				points[numPoints][1] = EARTH_RADIUS * cos(lat) * sin(longt);
+				points[numPoints][2] = EARTH_RADIUS * sin(lat);
+			
+				numPoints++;
+				if(numPoints % POINTS_BUFFER_SIZE == 0) {
+					printf("realloc! to hold %i points\n", numPoints + POINTS_BUFFER_SIZE);
+					points = realloc(points, (numPoints + POINTS_BUFFER_SIZE) * sizeof(double*));
+					geopoints = realloc(points, (numPoints + POINTS_BUFFER_SIZE) * sizeof(double*));
+					if(!points || !geopoints) {
+						printf("%i %i realloc() failed for buffer size %lu\n", points == 0, geopoints == 0, (numPoints + POINTS_BUFFER_SIZE) * sizeof(double*));
+						exit(1);
+					}
+				}
+			}
+
+			if(index >= numTokens) break;
+
+			// move to next point
+			while(tokens[index].type != JSMN_PRIMITIVE) {
+				index++;
+				if(index >= numTokens) break;
+				getTokenString(tokens, index, jsonString, tokenStr);
+				if(tokens[index].type == JSMN_STRING && strcmp(tokenStr, "Feature") == 0) {
+					goto_next_feat = 1;	
+					break;
+				}
+			}
+		}
+		
+		while(tokens[index].type != JSMN_STRING) {
+			index++;
+			getTokenString(tokens, index, jsonString, tokenStr);
+		}	
+
+	}
+
+	free(jsonString);
+	free(tokens);
+
+	quicksort(points, 0, numPoints-1, 0);
+  	
+	printf("%i points in dataset\n", numPoints);			
+	printf("sorted:\n");
+	for(int i=0; i<numPoints; i++) {
+		double* p = points[i];
+		printf("%i (", i);
+		for(int j=0; j<DIM; j++) {
+			if(j == DIM - 1) printf("%.7f)\n", p[j]); 
+			else printf("%.7f, ", p[j]);
+		}
+	}
+
+
+}
 double max(double a, double b) {
 	if(a > b) return a;
 	else return b;
@@ -237,178 +364,48 @@ void printTree(node* queue[], int* head, int* tail, int count) {
 
 }
 
-void buildTree_r(node* root, int axis, int l, int r) { // points = sorted points in x_axis, p_y = sorted points in y_axis
-	
-//	printf("buildTree_r l=%i, r=%i\n", l, r);
+void buildTree_r(double* kdarray, int axis, int l, int r, int root_index) { // points = sorted points in x_axis, p_y = sorted points in y_axis
 
+	// leaf node
 	if(r == l || l > r || r-l == 0) {
 		//printf("level %i leaf: ", root->level);
 		//printPoint(points[r]); 
-		root->p = r;
-		root->axis = (axis + (DIM-1)) % DIM; // obtain the previous axis
-		root->visited = 1;
+		kdarray[numPoints*0 + root_index] = points[r][0]; // x
+		kdarray[numPoints*1 + root_index] = points[r][1]; // y
+		kdarray[numPoints*2 + root_index] = points[r][2]; // z 
 		return;
 	}
 	
 	int split_index = l + (r-l)/2; // median index
 
-	if(root->visited == 0) {	
-		if(((r-l)+1)%2 == 0) root->split = (points[split_index][axis] + points[split_index+1][axis])/2; // even number of elements
-		else root->split = points[split_index][axis]; // odd number of elments; clear median
-		root->axis = axis;	
-		root->left = NULL; 
-		root->right = NULL;
-		root->visited = 1;
-		//printf("level %i, split node: %.12f\n", root->level,root->split);
-	}
+	if(((r-l)+1)%2 == 0) kdarray[root_index] = (points[split_index][axis] + points[split_index+1][axis])/2; // even number of elements
+	else kdarray[root_index] = points[split_index][axis]; // odd number of elments; clear median
 	
-	node* n_l;
-	if(!root->left) {
-		n_l = (node*) malloc(sizeof(node));
-		n_l->visited = 0;
-		n_l->p = -1;
-		n_l->level = root->level + 1;
-		root->left = n_l;
-		numNodes++;
-	} else {
-		printf("This should never happen\n");
-	}
-	
-	// sort all the values to the left of split index
+	// left child	
 	quicksort(points, l, split_index, (axis+1)%DIM); // sort in the next axis 
-	buildTree_r(root->left, (axis+1)%DIM, l, split_index);	
+	buildTree_r(kdarray, (axis+1)%DIM, l, split_index, 2*root_index+1);	
 
-	node* n_r;
-	if(!root->right) {
-		n_r = (node*) malloc(sizeof(node));
-		n_r->visited = 0;
-		n_r->p = -1;
-		n_r->level = root->level + 1;
-		root->right = n_r;
-		numNodes++;
-	} else {
-		printf("This should also never happen...\n");
-	}
-	// sort all the values the right of the split index
+	// right child
 	quicksort(points, split_index+1, r, (axis+1)%DIM); // sort in the next axis 
-	buildTree_r(root->right, (axis+1)%DIM, split_index+1, r);	
+	buildTree_r(kdarray, (axis+1)%DIM, split_index+1, r, 2*root_index+2);	
 	
 }
 
-node* buildTree() {
+double* buildTree() {
 	
-	//printf("buildTree()\n");
-	char tokenStr[BUFFER_SIZE];
-	int features_index = 0; // the index into the token array
 
-	// obtain the index into the tokens array where the features start	
-	for(int i=1; i<numTokens; i++) { 
-		if(tokens[i].type == JSMN_ARRAY && (tokens[i-1].end - tokens[i-1].start) == 8 && jsonString[ tokens[i-1].start ] == 'f') {	
-			getTokenString(i-1, tokenStr);
-			if(strcmp(tokenStr, "features") == 0) {
-				features_index = i;
-				break;
-			}
-		}
-	}
-
-	int index = features_index;
-	numPoints = tokens[features_index].size * 2; // each feature has 2 points
-	points = (double**) malloc(numPoints * DIM * sizeof(double*));
-	geopoints = (double**) malloc(numPoints * 2 * sizeof(double*));
-	int p_index = 0; // index into points
-	//printf("%d features\n", tokens[features_index].size);
-	memset(tokenStr, '\0', BUFFER_SIZE);	
-	
-	int pp_f = 0; // points per feature ; 2 for lines, 1 for points
-	for(int i=0; i<tokens[features_index].size; i++) { // for each feature
-		while(strcmp(tokenStr, "coordinates") != 0) {
-			if(tokens[index].type == JSMN_STRING) getTokenString(index, tokenStr);
-			index++;
-		}
-		getTokenString(index-2, tokenStr);
-//		printf("type %s\n", tokenStr);
-		if(strstr(tokenStr, "Point") != NULL) pp_f = 1; // points per feature
-		else pp_f = 2;
-	
-		index+=3; // goes to longitude token
-		char* end;
-		double lat, longt;	
-		for(int j=0; j<pp_f; j++) { // for each point in the feature
-			
-			// extracts the longtitude
-			getTokenString(index, tokenStr);
-			end = &tokenStr[tokens[index].size - 1]; // get a pointer to the last digit
-			longt = strtod(tokenStr, &end); 
-		 
-			// extract the latitude
-			getTokenString(index+1, tokenStr);
-			end = &tokenStr[tokens[index+1].size - 1]; // get pointer to the last digit
-			lat = strtod(tokenStr, &end); // save latitude value at index 0
-		
-			char dup = 0;
-			// see if this point has already been seen
-			for(int k=0; k<p_index; k++) {
-				if(geopoints[k][0] - lat < 1e-32 && geopoints[k][1] - longt < 1e-32) {
-	//				printf("%.12f, %.12f is already in the list\n", longt, lat);
-					dup = 1;
-					break;
-				}	
-			}
-
-			if(!dup) {
-				points[p_index] = malloc(DIM * sizeof(double));
-				geopoints[p_index] = malloc(2 * sizeof(double));
-
-				// save the geo coordinates	
-				geopoints[p_index][0] = lat;
-				geopoints[p_index][1] = longt;
-			
-				lat = getRadians(lat);
-				longt = getRadians(longt);	
-				// convert (lat, long) to (x,y,z)
-				points[p_index][0] = EARTH_RADIUS * cos(lat) * cos(longt); // x
-				points[p_index][1] = EARTH_RADIUS * cos(lat) * sin(longt);
-				points[p_index][2] = EARTH_RADIUS * sin(lat);
-			
-				p_index++;
-				
-			}
-						
-			index+=3; // move three tokens ahead to get to next point				
-		
-		}	
-	}
-
-	numPoints = p_index;
-	quicksort(points, 0, numPoints-1, 0);
-	
-//	printf("%i points in dataset\n", numPoints);			
-//	printf("sorted:\n");
-//	for(int i=0; i<numPoints; i++) {
-//		double* p = points[i];
-//		printf("%i (", i);
-//		for(int j=0; j<DIM; j++) {
-//			if(j == DIM - 1) printf("%.7f)\n", p[j]); 
-//			else printf("%.7f, ", p[j]);
-//		}
-//	}
-
-	node* root = (node*) malloc(sizeof(node));	
-	root->p = -1;
-	root->visited = 0;
-	root->level = 0;
+	double* kdarray = (double*) malloc(numPoints * DIM * sizeof(double));	
 	numNodes++;
 
-	buildTree_r(root, 0, 0, numPoints-1);
-///	printf("Build done. %i points, %i nodes\n", numPoints, numNodes);
+	buildTree_r(kdarray, 0, 0, numPoints-1, 0); //buildTree_r(double* kdarray, int axis, int l, int r, int root_index) 
+	printf("Build done. %i points, %i nodes\n", numPoints, numNodes);
 //	node* queue[numNodes];
 //	queue[0] = root;	
 //	int head = 1;
 //	int tail = 0;
 //	printTree(queue, &head, &tail, 0);
 	
-	return root;	
+	return kdarray;	
 }
 
 void printNode(node* n) {
@@ -486,13 +483,26 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 	
-	file = argv[1]; // file name		
+	char* file = argv[1]; // file name		
 	parseJSON(file);
+	printf("Parsing done\n");
+	
+	return 0;
+
 	start = clock();
-	node* kdtree = buildTree();
+	double* kdtree = buildTree();
 	end = clock();
 	printf("%i points, %i nodes: tree build in ", numPoints, numNodes);
 	elapsed(start, end);
+
+	// test print
+	for(int i=0; i<numPoints*DIM; i++) {
+		if(i%numPoints == 0) printf("|");
+		printf("%.12f, ", kdtree[i]);
+	}
+	printf("\n");
+
+	return 0;
 
 	double lat, longt;
 	lat = atof(argv[2]); // lat
@@ -515,7 +525,7 @@ int main(int argc, char* argv[]) {
 	int best;
 	double dist_best = range;
 	start = clock();	
-	findNearestPoint(kdtree, a, &best, &dist_best);
+	//findNearestPoint(kdtree, a, &best, &dist_best);
 	end = clock();
 
 	double dist = distance(a, points[best]);
