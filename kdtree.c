@@ -1,83 +1,147 @@
 /*
 
-	This builds a kdtree as an array, optimized for coalesced access on GPU
+	this builds a kdtree as a Structure of Array (SoA), optimized for coalesced access on gpu
 	[x1, x2, ..., xn, y1, y2, ... yn, z1, z2, ... zn] for n points
 
 */
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h> // log2()
+
 #include "kdtree.h"
 
-int kdtree_partition(double* points, int l, int r, int dim, int num_points) {
+// lat range: -90 to 90 ; longt range: -180 to 180
+// invalid point; (lat=-150, longt=-250) = (x=1073.585280926619, y=4323.631369885733, z=4554.477733167408) 
+#define INVALID_X 1073 
+
+int partition(double** points, int l, int r, int dim) {
 	
-	// the index into the points array where each dimension starts
-	int x_idx = num_points*0;
-	int y_idx = num_points*1;
-	int z_idx = num_points*2;
-	int this_idx = num_points*dim;
-	int swap = l+1; // the element to the right of the pivot
-
-	// iterate through all the elements except the pivot value (which is always the left-most element)
-	for(int i=l+1; i<=r; i++) { 	
-		if(points[this_idx + i] < points[this_idx + l]) { // compare the current element with the pivot ; if element is in the wrong spot, switch places 
-			// save old values from each dimension of this point
-			double x = points[x_idx + i];
-			double y = points[y_idx + i];
-			double z = points[z_idx + i];	
-
-			points[x_idx + i] = points[x_idx + swap];
-			points[y_idx + i] = points[y_idx + swap];
-			points[z_idx + i] = points[z_idx + swap];
-
-			points[x_idx + swap] = x;
-			points[y_idx + swap] = y;
-			points[z_idx + swap] = z;
+	int swap = l+1;
+	for(int i=l+1; i<=r; i++) { // iterate through all the elements except the pivot value (which is always the left-most element)
 	
+		if(points[i][dim] < points[l][dim]) { // compare the current element with the pivot ; if element is in the wrong spot, switch places 
+			double* p = points[swap];
+			points[swap] = points[i];
+			points[i] = p;
 			swap++;
 		}		
 	}
 
 	// swap the pivot
-//	double* p = points[l]; // pivot value
-	double x = points[x_idx + l];
-	double y = points[y_idx + l];
-	double z = points[z_idx + l];
-
-	points[x_idx + l] = points[x_idx + (swap - 1)];
-	points[y_idx + l] = points[y_idx + (swap - 1)];
-	points[z_idx + l] = points[z_idx + (swap - 1)];
-
-	points[x_idx + (swap - 1)] = x;
-	points[y_idx + (swap - 1)] = y;
-	points[z_idx + (swap - 1)] = z;
+	double* p = points[l]; // pivot value
+	points[l] = points[swap-1];
+	points[swap-1] = p;
 
 	return swap-1; // the partition point
 }
 
-void kdtree_quicksort(double* points, int num_points, int l, int r, int dim) { 
+void quicksort(double** points, int l, int r, int dim) { 
 
 	if(l > r) return;
 
-	int p;
-	p = kdtree_partition(points, l, r, dim, num_points);
+	int sep = partition(points, l, r, dim);
 	
-	kdtree_quicksort(points, l, p-1, dim, num_points);
-	kdtree_quicksort(points, p+1, r, dim, num_points);
+	quicksort(points, l, sep-1, dim);
+	quicksort(points, sep+1, r, dim);
 }
 
-void kdtree_build_r(double* points, int num_points, double* node, int l, int r, int dim) {
+void kdtree_print(kdtree* kdt) {
+	printf("-- kdtree: %i points, %i nodes --\n", kdt->num_points, kdt->num_nodes);
+	int new_line = 1;
+	for(int i=0; i<kdt->num_nodes; i++) {
+		if(i == new_line) {
+			printf("\n");
+			new_line *= 2 + 1;	
+		}
+		if( !(fabs(kdt->x[i]- INVALID_X) < 1e-32) ) printf("(x=%.2f, y=%.2f, z=%.2f), ", kdt->x[i], kdt->y[i], kdt->z[i]);
+		else printf("null, ");
+	}
+	printf("\n");
+}
 
-	//quicksort(points, num_points, l, r, dim);		
+void kdtree_build_r(double** points, int axis, kdtree* kdt, int l, int r, int index) {
+
+	//printf("kdtree_build_r(): l=%i, r=%i, index=%i\n", l, r, index);
+	
+	// if need to allocate more memory
+	if(kdt->num_nodes % kdt->num_nodes_limit == 0) {
+		kdt->num_nodes_limit *= 2; // double the size
+		int num_bytes = kdt->num_nodes_limit * sizeof(double); 
+		
+		kdt->x = realloc(kdt->x, num_bytes);
+		for(int i=kdt->num_nodes; i<kdt->num_nodes_limit; i++) {
+			kdt->x[i] = INVALID_X;
+		}
+		kdt->y = realloc(kdt->y, num_bytes);
+		kdt->z = realloc(kdt->z, num_bytes);	
+		if(!kdt->x || !kdt->y || !kdt->z) {
+			printf("kdtree_build_r() realloc failed for new buffer size %i\n", num_bytes);
+			exit(1);
+		}
+	}
+
+	// leaf node ; point
+	if(r == l || l > r || r-l == 0) {
+		kdt->x[index] = points[r][0]; // x
+		kdt->y[index] = points[r][1]; // y
+		kdt->z[index] = points[r][2]; // z 
+		kdt->num_nodes++;
+
+		return;
+	}
+	
+	int split_index = l + (r-l)/2; // median index
+	double split;
+	if( ((r-l)+1)%2 == 0) split = (points[split_index][axis] + points[split_index+1][axis])/2; // even number of elements 
+	else split = points[split_index][axis]; // odd number of elments
+
+	switch(axis) {
+		case 0:
+			kdt->x[index] = split;
+			kdt->y[index] = 0;
+			kdt->z[index] = 0;
+			break;
+		case 1:
+			kdt->x[index] = 0;
+			kdt->y[index] = split;
+			kdt->z[index] = 0;
+			break;
+		case 2:
+			kdt->x[index] = 0;
+			kdt->y[index] = 0;
+			kdt->z[index] = split;
+			break;
+	
+	}	
+	kdt->num_nodes++;
+	
+	// left child	
+	quicksort(points, l, split_index, (axis+1)%3); // sort in the next axis 
+	kdtree_build_r(points, (axis+1)%3, kdt, l, split_index, 2*index+1);	
+
+	// right child
+	quicksort(points, split_index+1, r, (axis+1)%3); // sort in the next axis 
+	kdtree_build_r(points, (axis+1)%3, kdt, split_index+1, r, 2*index+2);	
 
 }
 
-// assumes data contains points groups of 3 doubles: x, y, z
-double* kdtree_build(double* points, int num_points) {
+kdtree* kdtree_build(double** points, int num_points) {
 
-	double* root = malloc(num_points * 3);
-	kdtree_build_r(points, num_points, root, 0, num_points-1, 0);
-	
-	return root;
+	kdtree* kdt = (kdtree*) malloc(sizeof(kdtree));
+	kdt->num_points = num_points;
+	kdt->num_nodes = 0;
+	kdt->num_nodes_limit = (num_points * 3) * 2;
+	kdt->x = malloc(kdt->num_nodes_limit * sizeof(double));
+	for(int i=0; i<kdt->num_nodes_limit; i++) {
+		kdt->x[i] = INVALID_X;
+	}
+	kdt->y = malloc(kdt->num_nodes_limit * sizeof(double));
+	kdt->z = malloc(kdt->num_nodes_limit * sizeof(double));
+
+	kdtree_build_r(points, 0, kdt, 0, num_points-1, 0);	
+//	kdtree_print(kdt);
+
+	return kdt;
 }
 
