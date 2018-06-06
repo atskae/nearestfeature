@@ -22,6 +22,7 @@
 #define EARTH_RADIUS 6371 // in km
 
 #define DIM 3 // dimension of cartesian coordinates
+#define INVALID_X 1073 
 
 double** geopoints = NULL; // saving only for debugging purposes
 
@@ -227,80 +228,111 @@ double** parseJSON(char* file, int* num_points) {
 
 	free(jsonString);
 	free(tokens);
-
-	if((*num_points < 20)) {
-		quicksort(points, 0, (*num_points)-1, 0); 
-		printf("%i points in dataset; sorted by x-axis\n", *num_points);			
-		for(int i=0; i<*num_points; i++) {
-			double* p = points[i];
-			double* g = geopoints[i];
-			printf("(%.12f, %.12f, %.12f) | (%.12f, %.12f)\n", p[0], p[1], p[2], g[1], g[0]);
-		}
-	}
+//
+//	if((*num_points < 20)) {
+//		quicksort(points, 0, (*num_points)-1, 0); 
+//		printf("%i points in dataset; sorted by x-axis\n", *num_points);			
+//		for(int i=0; i<*num_points; i++) {
+//			double* p = points[i];
+//			double* g = geopoints[i];
+//			printf("(%.12f, %.12f, %.12f) | (%.12f, %.12f)\n", p[0], p[1], p[2], g[1], g[0]);
+//		}
+//	}
 
 	return points;
 }
 
-//void findBetter(node* n, double* p, int* best, double* dist_best) {
-//
-////	printf("best %i, current node: ", *best);
-////	printNode(n);
-////
-//	double dist = 0;
-//
-//	if(!n->left && !n->right) { // is a leaf node	
-//		for(int i=0; i<DIM; i++) {
-//			dist += pow((p[i] - points[n->p][i]), 2);	
-//		}	
-//		dist = sqrt(dist);
-//
-//		if(dist < *dist_best) {
-//			*best = n->p;
-//			*dist_best = dist;
-////			printf("best distance %.12f at point ", dist);
-////			printPoint(points[*best]);
-//			return;
-//
-//		}
-//	}
-//	else { // is a split node
-//		dist = fabs(p[n->axis] - n->split); // distance to line
-//		
-//		if(dist < *dist_best) {
-//			// explore the other side of the split line
-//			findBetter(n->left, p, best, dist_best); // explore the other half of tree
-//			findBetter(n->right, p, best, dist_best); 
-//		}	
-//	}	
-//	
-//}
-//
-//void findNearestPoint(node* n, double* p, int* best, double* dist_best) {
-//
-//	//printf("findNearestNeighbor()\n");		
-//	//printf("axis %i, level %i ", n->axis, n->level);
-//	//if(!n->left && !n->right) printPoint(points[n->p]);
-//	//else printf("split %.3f\n", n->split);
-//
-//	// base case: leaf node
-//	if(!n->left && !n->right) {
-//		//n->colored = 1;
-//		double dist = distance(p, points[n->p]);	
-//		if(dist < *dist_best) {
-//			*dist_best = dist;
-//			*best = n->p;
-//		}
-//		return;
-//	}
-//	
-//	if(p[n->axis] > n->split) {
-//		findNearestPoint(n->right, p, best, dist_best);	
-//		findBetter(n->left, p, best, dist_best); 
-//	} else {
-//		findNearestPoint(n->left, p, best, dist_best);
-//		findBetter(n->right, p, best, dist_best);
-//	}
-//}
+void print_point(kdtree* kdt, int idx) { 
+	
+	if(idx < kdt->num_nodes) printf("(%.12f, %.12f, %.12f)\n", kdt->x[idx], kdt->y[idx], kdt->z[idx]);
+	else printf("Print point %i out of bounds %i.\n", idx, kdt->num_points);
+}
+
+void findBetter(kdtree* kdt, int idx, int axis, double* p, int* best, double* dist_best) {
+
+//	printf("best %i, current node: ", *best);
+
+	double dist = 0;
+
+	if(fabs(kdt->x[idx*2 + 1] - INVALID_X) < 1e-32 && fabs(kdt->x[idx*2 + 2] - INVALID_X) < 1e-32) { // is a leaf node	
+		
+		double a[3];
+		a[0] = kdt->x[idx];
+		a[1] = kdt->y[idx];
+		a[2] = kdt->z[idx];
+
+		double dist = distance(p, a);		
+		if(dist < *dist_best) {
+			*best = idx;
+			*dist_best = dist;
+//			printf("best distance %.12f at point ", dist);
+//			printPoint(points[*best]);
+			return;
+
+		}
+	}
+	else { // is a split node
+
+		double split = kdt->x[idx] + kdt->y[idx] + kdt->z[idx];
+		dist = fabs(p[axis] - split); // distance to line
+	
+		if(dist < *dist_best) {
+			// explore the other side of the split line
+			findBetter(kdt, (idx*2+1), (axis+1)%3, p, best, dist_best); // left child
+			findBetter(kdt, (idx*2+2), (axis+1)%3, p, best, dist_best); // right child
+ 		}	
+		
+	}	
+	
+}
+
+void findNearestPoint_r(kdtree* kdt, int idx, int axis, double* p, int* best, double* dist_best) {
+
+//	printf("findNearestPoint_r(): ");
+	//print_point(kdt, idx);
+
+	// base case: leaf node
+	if( fabs(kdt->x[idx*2 + 1] - INVALID_X) < 1e-32 && fabs(kdt->x[idx*2 + 2] - INVALID_X) < 1e-32) { // check if this node has children
+//		printf("leaf node: ");
+//		print_point(kdt, idx);
+		
+		double a[3];
+		a[0] = kdt->x[idx];
+		a[1] = kdt->y[idx];
+		a[2] = kdt->z[idx];
+
+		double dist = distance(p, a);	
+		if(dist < *dist_best) {
+			*dist_best = dist;
+			*best = idx;
+		}
+		return;
+	}
+
+	double split = kdt->x[idx] + kdt->y[idx] + kdt->z[idx];
+	int next_axis = (axis+1)%3;	
+	if(p[axis] > split) {
+		findNearestPoint_r(kdt, (idx*2 + 2), next_axis, p, best, dist_best); // go to right side	
+		findBetter(kdt, (idx*2 + 1), next_axis, p, best, dist_best); 
+	} else {
+		findNearestPoint_r(kdt, (idx*2 + 1), next_axis, p, best, dist_best); // go to left side
+		findBetter(kdt, (idx*2 + 2), next_axis, p, best, dist_best);
+	}
+}
+
+// returns the index in the kdtree of the nearest point
+int findNearestPoint(kdtree* kdt, double* p, double range) {
+
+	int best = -1;
+	double dist_best = range;
+	
+	int root = 0;
+	int axis = 0;
+
+	findNearestPoint_r(kdt, root, axis, p, &best, &dist_best);
+
+	return best;	
+}
 
 int main(int argc, char* argv[]) {
 
@@ -317,7 +349,7 @@ int main(int argc, char* argv[]) {
 	start = clock();
 	kdtree* kdt = kdtree_build(points, num_points); 
 	end = clock();
-	printf("kdtree build in ");
+	printf("%i-node kdtree build in ", kdt->num_nodes);
 	elapsed(start, end);
 
 	double lat, longt;
@@ -351,7 +383,20 @@ int main(int argc, char* argv[]) {
 		}
 	}
 	end = clock();
-	printf("brute force result %i: ", best);
+	printf("bf result \t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", points[best][0], points[best][1], points[best][2], min, best);
+	elapsed(start, end);
+
+	// cpu ; only to verify that a correct tree has been built
+	start = clock();
+	best = findNearestPoint(kdt, a, range);	
+	end = clock();
+	if(best != -1) {
+		double b[3];
+		b[0] = kdt->x[best];
+		b[1] = kdt->y[best];
+		b[2] = kdt->z[best];
+		printf("kd result\t(%.12f, %.12f, %.12f) dist %.12fm idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], distance(a, b), best);
+	} else printf("no points within %.12f could be found...\n", range);
 	elapsed(start, end);
 
 	return 0;		
