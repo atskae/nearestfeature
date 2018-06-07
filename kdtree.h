@@ -7,7 +7,8 @@ typedef struct kdtree {
 	double* z;
 	int num_points;
 	int num_nodes;
-	int num_nodes_limit; // used only for building tree
+	int array_lim;
+	char* emptys; // keeps track of the empty nodes ; this is used to check if the node is a leaf
 } kdtree;
 
 int partition(double** points, int l, int r, int dim); 

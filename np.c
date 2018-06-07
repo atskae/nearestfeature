@@ -399,12 +399,12 @@ node* buildTree() {
 	numNodes++;
 
 	buildTree_r(root, 0, 0, numPoints-1);
-///	printf("Build done. %i points, %i nodes\n", numPoints, numNodes);
-//	node* queue[numNodes];
-//	queue[0] = root;	
-//	int head = 1;
-//	int tail = 0;
-//	printTree(queue, &head, &tail, 0);
+	printf("Build done. %i points, %i nodes\n", numPoints, numNodes);
+	node* queue[numNodes];
+	queue[0] = root;	
+	int head = 1;
+	int tail = 0;
+	printTree(queue, &head, &tail, 0);
 	
 	return root;	
 }

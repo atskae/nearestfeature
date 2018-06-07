@@ -17,14 +17,10 @@
 */
 
 #define BUFFER_SIZE 1600000
-#define POINTS_BUFFER_SIZE 10000 // the number of points to allocate at once ; arbitrary
 #define PI 3.14159265358979323846
 #define EARTH_RADIUS 6371 // in km
 
 #define DIM 3 // dimension of cartesian coordinates
-#define INVALID_X 1073 
-
-double** geopoints = NULL; // saving only for debugging purposes
 
 // returns the time elapsed in seconds 
 double elapsed(time_t start, time_t end) {
@@ -45,9 +41,6 @@ double getRadians(double degrees) { return (degrees * PI)/180; }
 	
 	return sqrt(sum);
 }
-
-// calculates the closest distance from point p to the a line
-double p_to_line(double* p, double split, int axis) { return fabs(p[axis] - split); }
 
 void getTokenString(jsmntok_t* tokens, int token_idx,  char* json_str, char* dest) {
 	
@@ -123,6 +116,7 @@ double** parseJSON(char* file, int* num_points) {
 	
 	char tokenStr[BUFFER_SIZE];
 	int numFeatures = 0;
+	int points_buffer_size = 10000; // the number of points to allocate at once ; arbitrary
 
 	// must parse according to geometry type: Point, LineString, Polygon, MultiPoint, MultiLineString, MutliPolygon ; https://en.wikipedia.org/wiki/GeoJSON
 
@@ -138,8 +132,8 @@ double** parseJSON(char* file, int* num_points) {
 		}
 	}
 
-	double** points = (double**) malloc(POINTS_BUFFER_SIZE * sizeof(double*));
-	geopoints = (double**) malloc(POINTS_BUFFER_SIZE * sizeof(double*));
+	double** points = (double**) malloc(points_buffer_size * sizeof(double*));
+	double** geopoints = (double**) malloc(points_buffer_size * sizeof(double*));
 	*num_points = 0; // index into points
 
 	for(int i=0; i<numFeatures; i++) {
@@ -200,11 +194,12 @@ double** parseJSON(char* file, int* num_points) {
 				points[i][2] = EARTH_RADIUS * sin(lat);
 			
 				(*num_points)++;
-				if(*num_points % POINTS_BUFFER_SIZE == 0) {
-					points = realloc(points, (*num_points + POINTS_BUFFER_SIZE) * sizeof(double*));
-					geopoints = realloc(points, (*num_points + POINTS_BUFFER_SIZE) * sizeof(double*));
+				if(*num_points == points_buffer_size) {					
+					points_buffer_size = points_buffer_size * 2;
+					points = realloc(points, points_buffer_size * sizeof(double*));
+					geopoints = realloc(geopoints, points_buffer_size * sizeof(double*));
 					if(!points || !geopoints) {
-						printf("%i %i realloc() failed for buffer size %lu\n", points == 0, geopoints == 0, (*num_points + POINTS_BUFFER_SIZE) * sizeof(double*));
+						printf("%i %i realloc() failed for buffer size %lu\n", points == 0, geopoints == 0, (*num_points + points_buffer_size) * sizeof(double*));
 						exit(1);
 					}
 				}
@@ -228,23 +223,22 @@ double** parseJSON(char* file, int* num_points) {
 
 	free(jsonString);
 	free(tokens);
-//
-//	if((*num_points < 20)) {
-//		quicksort(points, 0, (*num_points)-1, 0); 
-//		printf("%i points in dataset; sorted by x-axis\n", *num_points);			
-//		for(int i=0; i<*num_points; i++) {
-//			double* p = points[i];
-//			double* g = geopoints[i];
-//			printf("(%.12f, %.12f, %.12f) | (%.12f, %.12f)\n", p[0], p[1], p[2], g[1], g[0]);
-//		}
-//	}
+	free(geopoints);
+	points = realloc(points, (*num_points) * sizeof(double*));
 
+//	quicksort(points, 0, (*num_points)-1, 0); 	
+//	printf("%i points in dataset; sorted by x-axis\n", *num_points);			
+//	for(int i=25600; i<25601+10; i++) {
+//		double* p = points[i];
+//		printf("(%.12f, %.12f, %.12f)\n", p[0], p[1], p[2]);
+//	}
+//
 	return points;
 }
 
 void print_point(kdtree* kdt, int idx) { 
 	
-	if(idx < kdt->num_nodes) printf("(%.12f, %.12f, %.12f)\n", kdt->x[idx], kdt->y[idx], kdt->z[idx]);
+	if(idx < kdt->array_lim) printf("(%.12f, %.12f, %.12f)\n", kdt->x[idx], kdt->y[idx], kdt->z[idx]);
 	else printf("Print point %i out of bounds %i.\n", idx, kdt->num_points);
 }
 
@@ -252,9 +246,11 @@ void findBetter(kdtree* kdt, int idx, int axis, double* p, int* best, double* di
 
 //	printf("best %i, current node: ", *best);
 
-	double dist = 0;
+	if(idx > kdt->array_lim) return;
+	if(kdt->emptys[idx]) return;
 
-	if(fabs(kdt->x[idx*2 + 1] - INVALID_X) < 1e-32 && fabs(kdt->x[idx*2 + 2] - INVALID_X) < 1e-32) { // is a leaf node	
+	double dist = 0;
+	if(kdt->emptys[idx*2+1] && kdt->emptys[idx*2+2]) { // check if this is a leaf node
 		
 		double a[3];
 		a[0] = kdt->x[idx];
@@ -265,10 +261,7 @@ void findBetter(kdtree* kdt, int idx, int axis, double* p, int* best, double* di
 		if(dist < *dist_best) {
 			*best = idx;
 			*dist_best = dist;
-//			printf("best distance %.12f at point ", dist);
-//			printPoint(points[*best]);
 			return;
-
 		}
 	}
 	else { // is a split node
@@ -289,10 +282,12 @@ void findBetter(kdtree* kdt, int idx, int axis, double* p, int* best, double* di
 void findNearestPoint_r(kdtree* kdt, int idx, int axis, double* p, int* best, double* dist_best) {
 
 //	printf("findNearestPoint_r(): ");
-	//print_point(kdt, idx);
-
+	//print_point(kdt, idx);	
+	if(idx > kdt->array_lim) return;
+	if(kdt->emptys[idx]) return;
+	
 	// base case: leaf node
-	if( fabs(kdt->x[idx*2 + 1] - INVALID_X) < 1e-32 && fabs(kdt->x[idx*2 + 2] - INVALID_X) < 1e-32) { // check if this node has children
+	if(kdt->emptys[idx*2+1] && kdt->emptys[idx*2+2]) { // check if this node is a leaf
 //		printf("leaf node: ");
 //		print_point(kdt, idx);
 		
@@ -308,7 +303,7 @@ void findNearestPoint_r(kdtree* kdt, int idx, int axis, double* p, int* best, do
 		}
 		return;
 	}
-
+	
 	double split = kdt->x[idx] + kdt->y[idx] + kdt->z[idx];
 	int next_axis = (axis+1)%3;	
 	if(p[axis] > split) {
@@ -345,36 +340,35 @@ int main(int argc, char* argv[]) {
 	char* file = argv[1]; // file name
 	int num_points;
 	double** points = parseJSON(file, &num_points);
-
+	printf("Parsing complete.\n");
+	
 	start = clock();
 	kdtree* kdt = kdtree_build(points, num_points); 
 	end = clock();
-	printf("%i-node kdtree build in ", kdt->num_nodes);
+	printf("%i-node, %i points kdtree build in ", kdt->num_nodes, kdt->num_points);
 	elapsed(start, end);
 
 	double lat, longt;
 	lat = atof(argv[2]); // lat
-	longt = atof(argv[3]); // longt
-	
+	longt = atof(argv[3]); // longt	
 	lat = getRadians(lat);
 	longt = getRadians(longt);
 
-	double* a = malloc(DIM * sizeof(double));
+	double a[3];
 	a[0] = EARTH_RADIUS * cos(lat) * cos(longt); // x
 	a[1] = EARTH_RADIUS * cos(lat) * sin(longt); // y
 	a[2] = EARTH_RADIUS * sin(lat); // z
 	
 	double range = DBL_MAX;
 	if(argv[4]) range = atof(argv[4]);
-	double kdtree_time, bf_time;
 
 	/* running the nearest neightbor algorithm */
 
 	// brute force
 	start = clock();
-	double min = DBL_MAX;
+	double min = range;
 	double dist;
-	int best;
+	int best = -1;
 	for(int i=0; i<kdt->num_points; i++) {
 		dist = distance(a, points[i]);	
 		if(dist < min) {
@@ -383,21 +377,52 @@ int main(int argc, char* argv[]) {
 		}
 	}
 	end = clock();
+	double bf_best[3];
+	bf_best[0] = points[best][0];
+ 	bf_best[1] = points[best][1];
+	bf_best[2] = points[best][2];
+	
 	printf("bf result \t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", points[best][0], points[best][1], points[best][2], min, best);
-	elapsed(start, end);
+	time_t bf = elapsed(start, end);
 
 	// cpu ; only to verify that a correct tree has been built
 	start = clock();
 	best = findNearestPoint(kdt, a, range);	
 	end = clock();
+	double b[3];
 	if(best != -1) {
-		double b[3];
 		b[0] = kdt->x[best];
 		b[1] = kdt->y[best];
 		b[2] = kdt->z[best];
-		printf("kd result\t(%.12f, %.12f, %.12f) dist %.12fm idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], distance(a, b), best);
+		dist = distance(a, b);
+		printf("kd result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
 	} else printf("no points within %.12f could be found...\n", range);
-	elapsed(start, end);
+	time_t kd = elapsed(start, end);
+
+	double pd = fabs(min - dist)/((min + dist)/2) * 100;
+	printf("distance: %.2f percent different\n", pd);	
+
+	if(pd != 0) {
+		
+		char found = 0;
+		double d1, d2, d3;
+		
+		for(int i=0; i<kdt->array_lim; i++) {	
+			d1 = fabs(bf_best[0] - kdt->x[i]);
+			d2 = fabs(bf_best[1] - kdt->y[i]);
+			d3 = fabs(bf_best[2] - kdt->z[i]);
+	
+			if(d1 < 1e-32 && d2 < 1e-32 && d3 < 1e-32) {
+				printf("(%.12f, %.12f, %.12f)\n", kdt->x[i], kdt->y[i], kdt->z[i]);
+				found = 1;
+				break;
+			}
+		}
+	
+		if(found) printf("no excuse... there was a point that had a shorter distance in the kdtree :(\n");
+		else printf("WAAAAAS\n");
+	
+	}
 
 	return 0;		
 }
