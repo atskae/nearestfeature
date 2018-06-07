@@ -13,6 +13,7 @@ typedef struct kdtree {
 
 int partition(double** points, int l, int r, int dim); 
 void quicksort(double** points, int l, int r, int dim); 
+void print_point(kdtree* kdt, int idx);
 void kdtree_print(kdtree* kdt);
 void kdtree_build_r(double** points, int axis, kdtree* kdt, int l, int r, int index);
 kdtree* kdtree_build(double** points, int num_points);

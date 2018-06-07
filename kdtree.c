@@ -43,6 +43,17 @@ void quicksort(double** points, int l, int r, int dim) {
 	quicksort(points, sep+1, r, dim);
 }
 
+void print_point(kdtree* kdt, int idx) { 
+
+	if(idx > kdt->array_lim) {
+		printf("Print point %i out of bounds %i.\n", idx, kdt->num_points);
+		return;
+	}
+	printf("idx=%i, ", idx);
+	if(kdt->emptys[idx]) printf("null\n");
+	else printf("(%.12f, %.12f, %.12f)\n", kdt->x[idx], kdt->y[idx], kdt->z[idx]);
+}
+
 void kdtree_print(kdtree* kdt) {
 
 	// [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
@@ -136,7 +147,9 @@ void kdtree_build_r(double** points, int axis, kdtree* kdt, int l, int r, int in
 		case 2:
 			kdt->z[index] = split;
 			break;
-	
+		default:
+			printf("This should never happen.\n");
+			break;	
 	}		
 	kdt->num_nodes++;
 	// mark this node as not empty
@@ -167,11 +180,7 @@ kdtree* kdtree_build(double** points, int num_points) {
 
 	quicksort(points, 0, num_points-1, 0); // sort in the next axis 
 	kdtree_build_r(points, 0, kdt, 0, num_points-1, 0);	
-	printf("build finished\n");
-	// note to self: num_nodes is NOT the size of the x,y,z arrays!!!!!!!!!!!
-	// note: cannot realloc() kdt->x, kdt->y, and kdt->z simply with num_nodes because there are gaps in the array where there are no nodes	
-//	kdt->emptys = realloc(kdt->emptys, kdt->array_limt * sizeof(char));
-//	kdtree_print(kdt);
+	//	kdtree_print(kdt);
 
 	return kdt;
 }

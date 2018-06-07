@@ -236,15 +236,11 @@ double** parseJSON(char* file, int* num_points) {
 	return points;
 }
 
-void print_point(kdtree* kdt, int idx) { 
-	
-	if(idx < kdt->array_lim) printf("(%.12f, %.12f, %.12f)\n", kdt->x[idx], kdt->y[idx], kdt->z[idx]);
-	else printf("Print point %i out of bounds %i.\n", idx, kdt->num_points);
-}
-
 void findBetter(kdtree* kdt, int idx, int axis, double* p, int* best, double* dist_best) {
 
-//	printf("best %i, current node: ", *best);
+//	printf("findBetter() ");
+//	print_point(kdt, idx);	
+//	printf("best distance so far: %.12f at idx %i\n---\n", *dist_best, *best);
 
 	if(idx > kdt->array_lim) return;
 	if(kdt->emptys[idx]) return;
@@ -266,7 +262,24 @@ void findBetter(kdtree* kdt, int idx, int axis, double* p, int* best, double* di
 	}
 	else { // is a split node
 
-		double split = kdt->x[idx] + kdt->y[idx] + kdt->z[idx];
+//		double split = kdt->x[idx] + kdt->y[idx] + kdt->z[idx];
+		double split;
+	
+		switch(axis) {
+			case 0:
+				split = kdt->x[idx];
+				break;	
+			case 1:
+				split = kdt->x[idx];
+				break;	
+			case 2:
+				split = kdt->x[idx];
+				break;	
+			default:
+				printf("This should never happen.\n");
+				break;
+		}
+
 		dist = fabs(p[axis] - split); // distance to line
 	
 		if(dist < *dist_best) {
@@ -281,8 +294,8 @@ void findBetter(kdtree* kdt, int idx, int axis, double* p, int* best, double* di
 
 void findNearestPoint_r(kdtree* kdt, int idx, int axis, double* p, int* best, double* dist_best) {
 
-//	printf("findNearestPoint_r(): ");
-	//print_point(kdt, idx);	
+//	printf("findNearestPoint_r() ");
+//	print_point(kdt, idx);	
 	if(idx > kdt->array_lim) return;
 	if(kdt->emptys[idx]) return;
 	
@@ -303,8 +316,26 @@ void findNearestPoint_r(kdtree* kdt, int idx, int axis, double* p, int* best, do
 		}
 		return;
 	}
+
 	
-	double split = kdt->x[idx] + kdt->y[idx] + kdt->z[idx];
+	
+//	double split = kdt->x[idx] + kdt->y[idx] + kdt->z[idx];
+	double split;
+	switch(axis) {
+		case 0:
+			split = kdt->x[idx];
+			break;	
+		case 1:
+			split = kdt->x[idx];
+			break;	
+		case 2:
+			split = kdt->x[idx];
+			break;	
+		default:
+			printf("This should never happen.\n");
+			break;
+	}
+
 	int next_axis = (axis+1)%3;	
 	if(p[axis] > split) {
 		findNearestPoint_r(kdt, (idx*2 + 2), next_axis, p, best, dist_best); // go to right side	
@@ -413,7 +444,7 @@ int main(int argc, char* argv[]) {
 			d3 = fabs(bf_best[2] - kdt->z[i]);
 	
 			if(d1 < 1e-32 && d2 < 1e-32 && d3 < 1e-32) {
-				printf("(%.12f, %.12f, %.12f)\n", kdt->x[i], kdt->y[i], kdt->z[i]);
+				printf("i=%i, (%.12f, %.12f, %.12f)\n", i, kdt->x[i], kdt->y[i], kdt->z[i]);
 				found = 1;
 				break;
 			}
