@@ -7,6 +7,7 @@
 
 #include "jsmn.h" // JSON file parser
 #include "kdtree.h"
+#include "pq.h"
 
 /*
 	Implementation of "GPU-accelerated Nearest Neighbor Search for 3D Registration" Qiu 2009	
@@ -19,6 +20,7 @@
 #define BUFFER_SIZE 1600000
 #define PI 3.14159265358979323846
 #define EARTH_RADIUS 6371 // in km
+#define PQ_SIZE 100 // priority queue size
 
 #define DIM 3 // dimension of cartesian coordinates
 
@@ -242,18 +244,15 @@ void findBetter(kdtree* kdt, int idx, int axis, double* p, int* best, double* di
 //	print_point(kdt, idx);	
 //	printf("best distance so far: %.12f at idx %i\n---\n", *dist_best, *best);
 
-	if(idx > kdt->array_lim) return;
-	if(kdt->emptys[idx]) return;
-
 	double dist = 0;
 	if(kdt->emptys[idx*2+1] && kdt->emptys[idx*2+2]) { // check if this is a leaf node
 		
-		double a[3];
-		a[0] = kdt->x[idx];
-		a[1] = kdt->y[idx];
-		a[2] = kdt->z[idx];
-
-		double dist = distance(p, a);		
+		double sum = 0;
+		sum += pow((kdt->x[idx] - p[0]), 2);	
+		sum += pow((kdt->y[idx] - p[1]), 2);	
+		sum += pow((kdt->z[idx] - p[2]), 2);
+		dist = sqrt(sum);
+		
 		if(dist < *dist_best) {
 			*best = idx;
 			*dist_best = dist;
@@ -283,6 +282,10 @@ void findBetter(kdtree* kdt, int idx, int axis, double* p, int* best, double* di
 		dist = fabs(p[axis] - split); // distance to line
 	
 		if(dist < *dist_best) {
+
+			if(idx*2+1 > kdt->array_lim || idx*2+2 > kdt->array_lim) return;
+			if(kdt->emptys[idx*2+1] || kdt->emptys[idx*2+2]) return;
+
 			// explore the other side of the split line
 			findBetter(kdt, (idx*2+1), (axis+1)%3, p, best, dist_best); // left child
 			findBetter(kdt, (idx*2+2), (axis+1)%3, p, best, dist_best); // right child
@@ -296,20 +299,18 @@ void findNearestPoint_r(kdtree* kdt, int idx, int axis, double* p, int* best, do
 
 //	printf("findNearestPoint_r() ");
 //	print_point(kdt, idx);	
-	if(idx > kdt->array_lim) return;
-	if(kdt->emptys[idx]) return;
 	
 	// base case: leaf node
 	if(kdt->emptys[idx*2+1] && kdt->emptys[idx*2+2]) { // check if this node is a leaf
 //		printf("leaf node: ");
 //		print_point(kdt, idx);
 		
-		double a[3];
-		a[0] = kdt->x[idx];
-		a[1] = kdt->y[idx];
-		a[2] = kdt->z[idx];
-
-		double dist = distance(p, a);	
+		double sum = 0;
+		sum += pow((kdt->x[idx] - p[0]), 2);	
+		sum += pow((kdt->y[idx] - p[1]), 2);	
+		sum += pow((kdt->z[idx] - p[2]), 2);
+		double dist = sqrt(sum);
+		
 		if(dist < *dist_best) {
 			*dist_best = dist;
 			*best = idx;
@@ -337,6 +338,10 @@ void findNearestPoint_r(kdtree* kdt, int idx, int axis, double* p, int* best, do
 	}
 
 	int next_axis = (axis+1)%3;	
+
+	if(idx*2+1 > kdt->array_lim || idx*2+2 > kdt->array_lim) return;
+	if(kdt->emptys[idx*2+1] || kdt->emptys[idx*2+2]) return;
+
 	if(p[axis] > split) {
 		findNearestPoint_r(kdt, (idx*2 + 2), next_axis, p, best, dist_best); // go to right side	
 		findBetter(kdt, (idx*2 + 1), next_axis, p, best, dist_best); 
@@ -360,6 +365,90 @@ int findNearestPoint(kdtree* kdt, double* p, double range) {
 	return best;	
 }
 
+// using priority queue
+int findNearestPoint_pq(kdtree* kdt, double* p, double range) {
+
+//	printf("findNearestPoint_pq()\n");
+
+	int best = -1;
+	double dist_best = range;
+
+	// initalize priority queue and place root node
+	pqueue* q = pq_build(PQ_SIZE);
+	double r[3];
+	r[0] = kdt->x[0];
+	r[1] = kdt->y[0];
+	r[2] = kdt->z[0];
+	pq_insert(q, 0, distance(r, p)); //int pq_insert(pqueue* q, int idx, double dist) 
+	
+	int current_node;
+	
+	while(q->num_elems != 0) { // while the queue is not empty
+		// extract the current minimum
+		current_node = pq_extract(q);
+//		pq_print(q);
+
+		// descend this subtree until we reach a leaf; add the higher distanced' sibling in the queue as we descend the nodes
+		while(current_node*2+1 <= kdt->array_lim) { // descend until we reach a leaf node
+			
+			if(kdt->emptys[current_node*2+1] && kdt->emptys[current_node*2+2]) break; // is a leaf node
+	
+			double left[3];
+			double left_dist = DBL_MAX;
+			int left_idx = current_node*2 + 1;
+
+			double right[3];
+			double right_dist = DBL_MAX;
+			int right_idx = current_node*2 + 2;
+	
+			// check which children has a shorter distance from the query point
+			if(!kdt->emptys[left_idx]) {
+				left[0] = kdt->x[left_idx];
+				left[1] = kdt->y[left_idx];
+				left[2] = kdt->z[left_idx];
+				left_dist = distance(p, left); // this might not work since the values in the other axis are not zero'ed out.... triple check
+			}
+
+			if(!kdt->emptys[right_idx]) {
+				right[0] = kdt->x[right_idx];
+				right[1] = kdt->y[right_idx];
+				right[2] = kdt->z[right_idx];
+				right_dist = distance(p, right);
+			}
+//			printf("current_node idx=%i, left_child %i, right_child %i, kdt max index %i\n", current_node, left_idx, right_idx, kdt->array_lim);			
+	
+			if(left_dist < right_dist) {
+				if(!kdt->emptys[right_idx]) pq_insert(q, right_idx, right_dist);
+				//printf("inserting right_idx=%i\n", right_idx);	
+				current_node = left_idx; // descend to lower distance'd node
+			} else {
+				if(!kdt->emptys[left_idx]) {
+					pq_insert(q, left_idx, left_dist);
+//					printf("current_node %i inserting left_idx=%i\n", current_node, left_idx);	
+				}
+				current_node = right_idx;
+			}
+
+//			printf("current_node %i, empty? %i\n", current_node, kdt->emptys[current_node]);			
+		} // while not at leaf ; end		
+
+		// reached leaf node ; update best seen so far
+		//printf("Reached leaf node with idx=%i\n", current_node);
+		double current_pt[3];	
+		current_pt[0] = kdt->x[current_node];
+		current_pt[1] = kdt->y[current_node];
+		current_pt[2] = kdt->z[current_node];	
+		double current_dist = distance(current_pt, p);
+
+		if(current_dist < dist_best) {
+			best = current_node;
+			dist_best = current_dist;	
+		}
+	}
+
+	return best;
+}
+
 int main(int argc, char* argv[]) {
 
 	time_t start, end;	
@@ -378,6 +467,7 @@ int main(int argc, char* argv[]) {
 	end = clock();
 	printf("%i-node, %i points kdtree build in ", kdt->num_nodes, kdt->num_points);
 	elapsed(start, end);
+	//	kdtree_print(kdt);
 
 	double lat, longt;
 	lat = atof(argv[2]); // lat
@@ -420,6 +510,7 @@ int main(int argc, char* argv[]) {
 	start = clock();
 	best = findNearestPoint(kdt, a, range);	
 	end = clock();
+
 	double b[3];
 	if(best != -1) {
 		b[0] = kdt->x[best];
@@ -431,8 +522,8 @@ int main(int argc, char* argv[]) {
 	time_t kd = elapsed(start, end);
 
 	double pd = fabs(min - dist)/((min + dist)/2) * 100;
-	printf("distance: %.2f percent different\n", pd);	
-
+//	printf("distance: %.2f percent different\n", pd);	
+	// check for correct answer
 	if(pd != 0) {
 		
 		char found = 0;
@@ -455,5 +546,22 @@ int main(int argc, char* argv[]) {
 	
 	}
 
+	// nearest neighbor using priority queue
+	start = clock();
+	best = findNearestPoint_pq(kdt, a, range);	
+	end = clock();;
+	if(best != -1) {
+		b[0] = kdt->x[best];
+		b[1] = kdt->y[best];
+		b[2] = kdt->z[best];
+		dist = distance(a, b);
+		printf("pq result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
+	} else printf("no points within %.12f could be found...\n", range);
+	kd = elapsed(start, end);
+	pd = fabs(min - dist)/((min + dist)/2) * 100;
+	printf("distance: %.2f percent different (pq and brute force)\n", pd);	
+//	kdtree_print(kdt);
+//
+			
 	return 0;		
 }

@@ -68,7 +68,7 @@ void kdtree_print(kdtree* kdt) {
 			printf("level %i, axis %i\n", level, level%3);
 			new_line = (new_line * 2) + 1;		
 		}
-		if(!kdt->emptys[i]) printf("%i (x=%.3f, y=%.3f, z=%.3f)\n", i, kdt->x[i], kdt->y[i], kdt->z[i]);
+		if(!kdt->emptys[i]) printf("%i (x=%.12f, y=%.12f, z=%.12f)\n", i, kdt->x[i], kdt->y[i], kdt->z[i]);
 		else printf("%i (null)\n", i);
 	}
 	printf("--\n");
@@ -179,6 +179,7 @@ kdtree* kdtree_build(double** points, int num_points) {
 	kdt->z = malloc(kdt->array_lim * sizeof(double));
 
 	quicksort(points, 0, num_points-1, 0); // sort in the next axis 
+	printf("kdtree_build_r\n");
 	kdtree_build_r(points, 0, kdt, 0, num_points-1, 0);	
 	//	kdtree_print(kdt);
 
