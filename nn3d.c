@@ -34,7 +34,7 @@ double elapsed(time_t start, time_t end) {
 double getRadians(double degrees) { return (degrees * PI)/180; }
 
 // calculates the distance between cartesian points
- double distance(double* a, double* b) {
+double distance(double* a, double* b) {
 	
 	double sum = 0;
 	for(int i=0; i<DIM; i++) {
@@ -42,6 +42,17 @@ double getRadians(double degrees) { return (degrees * PI)/180; }
 	}
 	
 	return sqrt(sum);
+}
+
+double distance_by_idx(kdtree* kdt, int idx, double* p) {
+		
+	double sum = 0;
+	sum += pow((kdt->x[idx] - p[0]), 2);	
+	sum += pow((kdt->y[idx] - p[1]), 2);	
+	sum += pow((kdt->z[idx] - p[2]), 2);	
+
+	return sqrt(sum);
+
 }
 
 void getTokenString(jsmntok_t* tokens, int token_idx,  char* json_str, char* dest) {
@@ -375,14 +386,12 @@ int findNearestPoint_pq(kdtree* kdt, double* p, double range) {
 
 	// initalize priority queue and place root node
 	pqueue* q = pq_build(PQ_SIZE);
-	double r[3];
-	r[0] = kdt->x[0];
-	r[1] = kdt->y[0];
-	r[2] = kdt->z[0];
-	pq_insert(q, 0, distance(r, p)); //int pq_insert(pqueue* q, int idx, double dist) 
-	
+	pq_insert(q, 0, distance_by_idx(kdt, 0, p));	// distance to root
+
 	int current_node;
-	
+	double left_dist, right_dist;
+	int left_idx, right_idx;
+	double current_dist;
 	while(q->num_elems != 0) { // while the queue is not empty
 		// extract the current minimum
 		current_node = pq_extract(q);
@@ -391,54 +400,30 @@ int findNearestPoint_pq(kdtree* kdt, double* p, double range) {
 		// descend this subtree until we reach a leaf; add the higher distanced' sibling in the queue as we descend the nodes
 		while(current_node*2+1 <= kdt->array_lim) { // descend until we reach a leaf node
 			
-			if(kdt->emptys[current_node*2+1] && kdt->emptys[current_node*2+2]) break; // is a leaf node
-	
-			double left[3];
-			double left_dist = DBL_MAX;
-			int left_idx = current_node*2 + 1;
+			left_idx = current_node*2 + 1;
+			right_idx = current_node*2 + 2;
 
-			double right[3];
-			double right_dist = DBL_MAX;
-			int right_idx = current_node*2 + 2;
+			if(kdt->emptys[left_idx] && kdt->emptys[right_idx]) break; // is a leaf node
 	
+			left_dist = DBL_MAX;	
+			right_dist = DBL_MAX;
+				
 			// check which children has a shorter distance from the query point
-			if(!kdt->emptys[left_idx]) {
-				left[0] = kdt->x[left_idx];
-				left[1] = kdt->y[left_idx];
-				left[2] = kdt->z[left_idx];
-				left_dist = distance(p, left); // this might not work since the values in the other axis are not zero'ed out.... triple check
-			}
-
-			if(!kdt->emptys[right_idx]) {
-				right[0] = kdt->x[right_idx];
-				right[1] = kdt->y[right_idx];
-				right[2] = kdt->z[right_idx];
-				right_dist = distance(p, right);
-			}
-//			printf("current_node idx=%i, left_child %i, right_child %i, kdt max index %i\n", current_node, left_idx, right_idx, kdt->array_lim);			
+			if(!kdt->emptys[left_idx]) left_dist = distance_by_idx(kdt, left_idx, p);
+			if(!kdt->emptys[right_idx]) right_dist = distance_by_idx(kdt, right_idx, p);
 	
 			if(left_dist < right_dist) {
-				if(!kdt->emptys[right_idx]) pq_insert(q, right_idx, right_dist);
-				//printf("inserting right_idx=%i\n", right_idx);	
+				if(!kdt->emptys[right_idx]) pq_insert(q, right_idx, right_dist); // insert the other sibling
 				current_node = left_idx; // descend to lower distance'd node
 			} else {
-				if(!kdt->emptys[left_idx]) {
-					pq_insert(q, left_idx, left_dist);
-//					printf("current_node %i inserting left_idx=%i\n", current_node, left_idx);	
-				}
+				if(!kdt->emptys[left_idx]) pq_insert(q, left_idx, left_dist);				
 				current_node = right_idx;
 			}
 
-//			printf("current_node %i, empty? %i\n", current_node, kdt->emptys[current_node]);			
 		} // while not at leaf ; end		
 
 		// reached leaf node ; update best seen so far
-		//printf("Reached leaf node with idx=%i\n", current_node);
-		double current_pt[3];	
-		current_pt[0] = kdt->x[current_node];
-		current_pt[1] = kdt->y[current_node];
-		current_pt[2] = kdt->z[current_node];	
-		double current_dist = distance(current_pt, p);
+		current_dist = distance_by_idx(kdt, current_node, p);
 
 		if(current_dist < dist_best) {
 			best = current_node;
@@ -458,20 +443,19 @@ int main(int argc, char* argv[]) {
 	}
 	
 	char* file = argv[1]; // file name
-	int num_points;
-	double** points = parseJSON(file, &num_points);
-	printf("Parsing complete.\n");
-	
-	start = clock();
-	kdtree* kdt = kdtree_build(points, num_points); 
-	end = clock();
-	printf("%i-node, %i points kdtree build in ", kdt->num_nodes, kdt->num_points);
-	elapsed(start, end);
-	//	kdtree_print(kdt);
 
 	double lat, longt;
 	lat = atof(argv[2]); // lat
 	longt = atof(argv[3]); // longt	
+	if(lat < -90 || lat > 90) {
+		printf("Latitude out of range. Must be between -90 and 90.\n");
+		return 1;
+	}
+	if(longt < -180 || longt > 180) {
+		printf("Longtitude out of range. Must be between -180and 180.\n");
+		return 1;
+	}
+
 	lat = getRadians(lat);
 	longt = getRadians(longt);
 
@@ -482,6 +466,17 @@ int main(int argc, char* argv[]) {
 	
 	double range = DBL_MAX;
 	if(argv[4]) range = atof(argv[4]);
+
+	int num_points;
+	double** points = parseJSON(file, &num_points);
+	printf("Parsing complete.\n");
+	
+	start = clock();
+	kdtree* kdt = kdtree_build(points, num_points); 
+	end = clock();
+	printf("%i-node, %i points kdtree build in ", kdt->num_nodes, kdt->num_points);
+	elapsed(start, end);
+	//	kdtree_print(kdt);
 
 	/* running the nearest neightbor algorithm */
 
@@ -551,10 +546,7 @@ int main(int argc, char* argv[]) {
 	best = findNearestPoint_pq(kdt, a, range);	
 	end = clock();;
 	if(best != -1) {
-		b[0] = kdt->x[best];
-		b[1] = kdt->y[best];
-		b[2] = kdt->z[best];
-		dist = distance(a, b);
+		dist = distance_by_idx(kdt, best, a);
 		printf("pq result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
 	} else printf("no points within %.12f could be found...\n", range);
 	kd = elapsed(start, end);
