@@ -76,6 +76,7 @@ void kdtree_print(kdtree* kdt) {
 
 void kdtree_build_r(double** points, int axis, kdtree* kdt, int l, int r, int index) {
 
+//	printf("valid %i, index=%i, max_index=%i\n", index < kdt->array_lim, index, kdt->array_lim);
 	// leaf node ; point
 	if(r == l || l > r || r-l == 0) {
 	
@@ -116,7 +117,7 @@ void kdtree_build_r(double** points, int axis, kdtree* kdt, int l, int r, int in
 	else split = points[split_index][axis]; // odd number of elments
 
 	// if need to allocate more memory
-	if(index > kdt->array_lim ) {			
+	if(index > kdt->array_lim) {			
 		int prev_lim = kdt->array_lim;
 		kdt->array_lim = index*2 + 2; // the index to the right child
 		kdt->emptys = realloc(kdt->emptys, (kdt->array_lim) * sizeof(char));
