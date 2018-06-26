@@ -81,20 +81,24 @@ void kdtree_build_r(double** points, int axis, kdtree* kdt, int l, int r, int in
 	if(r == l || l > r || r-l == 0) {
 	
 		// if need to allocate more memory
-		if(index > (kdt->array_lim) ) {			
+		if(index*2 + 2 > (kdt->array_lim) ) {			
 			int prev_lim = kdt->array_lim;
 			kdt->array_lim = index*2 + 2; // the index to the right child
-			kdt->emptys = realloc(kdt->emptys, (kdt->array_lim) * sizeof(char));
+			kdt->emptys = realloc(kdt->emptys, (kdt->array_lim) * sizeof(char) + 1);
+			if(!kdt->emptys) {
+				printf("Realloc %lu bytes kdt->emptys() failed\n", (kdt->array_lim) * sizeof(char) + 1);
+				exit(1);
+			}	
 			for(int i=prev_lim; i<=kdt->array_lim; i++) {
 				kdt->emptys[i] = 1;
 			}	
-			int num_bytes = (kdt->array_lim) * sizeof(double); 			
+			int num_bytes = (kdt->array_lim) * sizeof(double) + 1; 			
 			kdt->x = realloc(kdt->x, num_bytes);
 			kdt->y = realloc(kdt->y, num_bytes);
 			kdt->z = realloc(kdt->z, num_bytes);	
 			if(!kdt->x || !kdt->y || !kdt->z) {
 				printf("kdtree_build_r() realloc failed for new buffer size %i\n", num_bytes);
-				exit(1);
+				return;
 			}
 		}
 		kdt->x[index] = points[r][0]; // x
@@ -117,20 +121,20 @@ void kdtree_build_r(double** points, int axis, kdtree* kdt, int l, int r, int in
 	else split = points[split_index][axis]; // odd number of elments
 
 	// if need to allocate more memory
-	if(index > kdt->array_lim) {			
+	if(index*2 + 2 > kdt->array_lim) {			
 		int prev_lim = kdt->array_lim;
-		kdt->array_lim = index*2 + 2; // the index to the right child
-		kdt->emptys = realloc(kdt->emptys, (kdt->array_lim) * sizeof(char));
+		kdt->array_lim = index*2 + 2; // the index to the right child	
+		kdt->emptys = realloc(kdt->emptys, (kdt->array_lim) * sizeof(char) + 1);
 		for(int i=prev_lim; i<=kdt->array_lim; i++) {
 			kdt->emptys[i] = 1;
 		}	
-		int num_bytes = (kdt->array_lim) * sizeof(double); 			
+		int num_bytes = (kdt->array_lim) * sizeof(double) + 1; 			
 		kdt->x = realloc(kdt->x, num_bytes);
 		kdt->y = realloc(kdt->y, num_bytes);
 		kdt->z = realloc(kdt->z, num_bytes);	
 		if(!kdt->x || !kdt->y || !kdt->z) {
 			printf("kdtree_build_r() realloc failed for new buffer size %i\n", num_bytes);
-			exit(1);
+			return;
 		}
 	}
 	
@@ -173,13 +177,21 @@ kdtree* kdtree_build(double** points, int num_points) {
 	kdt->num_nodes = 0;
 	kdt->array_lim = num_points * 2; // the highest index in the array ; aka size of the array ; this is NOT the same as the number of nodes in the tree
 	kdt->emptys = (char*) malloc(kdt->array_lim * sizeof(char)); // must use this to mark the gaps in the array as empty nodes
+	if(!kdt->emptys) {
+		printf("malloc() kdt->emptys failed\n");
+		return NULL;
+	}
 	memset(kdt->emptys, 1, kdt->array_lim * sizeof(char)); // all the nodes are empty initially
 	
 	kdt->x = malloc(kdt->array_lim * sizeof(double));
 	kdt->y = malloc(kdt->array_lim * sizeof(double));
 	kdt->z = malloc(kdt->array_lim * sizeof(double));
+	if(!kdt->x || !kdt->y || !kdt->z) {
+		printf("malloc() kdt points failed\n");
+		return NULL;
+	}
 
-	quicksort(points, 0, num_points-1, 0); // sort in the next axis 
+	quicksort(points, 0, num_points-1, 0); // sort in the first axis 
 	printf("kdtree_build_r\n");
 	kdtree_build_r(points, 0, kdt, 0, num_points-1, 0);	
 	//	kdtree_print(kdt);

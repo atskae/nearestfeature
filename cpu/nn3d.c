@@ -375,64 +375,64 @@ int findNearestPoint(kdtree* kdt, double* p, double range) {
 
 	return best;	
 }
-
-// using priority queue
-int findNearestPoint_pq(kdtree* kdt, double* p, double range) {
-
-//	printf("findNearestPoint_pq()\n");
-
-	int best = -1;
-	double dist_best = range;
-
-	// initalize priority queue and place root node
-	pqueue* q = pq_build(PQ_SIZE);
-	pq_insert(q, 0, distance_by_idx(kdt, 0, p)); // distance to root
-
-	int current_node;
-	double left_dist, right_dist;
-	int left_idx, right_idx;
-	double current_dist;
-	while(q->num_elems != 0) { // while the queue is not empty
-	// extract the current minimum
-		current_node = pq_extract(q);
-//		pq_print(q);
-
-		// descend this subtree until we reach a leaf; add the higher distanced' sibling in the queue as we descend the nodes
-		while(current_node*2+1 <= kdt->array_lim) { // descend until we reach a leaf node
-			
-			left_idx = current_node*2 + 1;
-			right_idx = current_node*2 + 2;
-
-			if(kdt->emptys[left_idx] && kdt->emptys[right_idx]) break; // is a leaf node
-	
-			left_dist = DBL_MAX;	
-			right_dist = DBL_MAX;
-				
-			// check which children has a shorter distance from the query point
-			if(!kdt->emptys[left_idx]) left_dist = distance_by_idx(kdt, left_idx, p);
-			if(!kdt->emptys[right_idx]) right_dist = distance_by_idx(kdt, right_idx, p);
-	
-			if(left_dist < right_dist) {
-				if(!kdt->emptys[right_idx]) pq_insert(q, right_idx, right_dist); // insert the other sibling
-				current_node = left_idx; // descend to lower distance'd node
-			} else {
-				if(!kdt->emptys[left_idx]) pq_insert(q, left_idx, left_dist);				
-				current_node = right_idx;
-			}
-
-		} // while not at leaf ; end		
-
-		// reached leaf node ; update best seen so far
-		current_dist = distance_by_idx(kdt, current_node, p);
-
-		if(current_dist < dist_best) {
-			best = current_node;
-			dist_best = current_dist;	
-		}
-	}
-
-	return best;
-}
+//
+//// using priority queue
+//int findNearestPoint_pq(kdtree* kdt, double* p, double range) {
+//
+////	printf("findNearestPoint_pq()\n");
+//
+//	int best = -1;
+//	double dist_best = range;
+//
+//	// initalize priority queue and place root node
+//	pqueue* q = pq_build(PQ_SIZE);
+//	pq_insert(q, 0, distance_by_idx(kdt, 0, p)); // distance to root
+//
+//	int current_node;
+//	double left_dist, right_dist;
+//	int left_idx, right_idx;
+//	double current_dist;
+//	while(q->num_elems != 0) { // while the queue is not empty
+//	// extract the current minimum
+//		current_node = pq_extract(q);
+////		pq_print(q);
+//
+//		// descend this subtree until we reach a leaf; add the higher distanced' sibling in the queue as we descend the nodes
+//		while(current_node*2+1 <= kdt->array_lim) { // descend until we reach a leaf node
+//			
+//			left_idx = current_node*2 + 1;
+//			right_idx = current_node*2 + 2;
+//
+//			if(kdt->emptys[left_idx] && kdt->emptys[right_idx]) break; // is a leaf node
+//	
+//			left_dist = DBL_MAX;	
+//			right_dist = DBL_MAX;
+//				
+//			// check which children has a shorter distance from the query point
+//			if(!kdt->emptys[left_idx]) left_dist = distance_by_idx(kdt, left_idx, p);
+//			if(!kdt->emptys[right_idx]) right_dist = distance_by_idx(kdt, right_idx, p);
+//	
+//			if(left_dist < right_dist) {
+//				if(!kdt->emptys[right_idx]) pq_insert(q, right_idx, right_dist); // insert the other sibling
+//				current_node = left_idx; // descend to lower distance'd node
+//			} else {
+//				if(!kdt->emptys[left_idx]) pq_insert(q, left_idx, left_dist);				
+//				current_node = right_idx;
+//			}
+//
+//		} // while not at leaf ; end		
+//
+//		// reached leaf node ; update best seen so far
+//		current_dist = distance_by_idx(kdt, current_node, p);
+//
+//		if(current_dist < dist_best) {
+//			best = current_node;
+//			dist_best = current_dist;	
+//		}
+//	}
+//
+//	return best;
+//}
 
 int main(int argc, char* argv[]) {
 
@@ -553,20 +553,20 @@ int main(int argc, char* argv[]) {
 		
 		} else num_correct[0]++;
 	
-		// nearest neighbor using priority queue
-		start = clock();
-		best = findNearestPoint_pq(kdt, query_pt, range);	
-		end = clock();
-		if(best != -1) {
-			dist = distance_by_idx(kdt, best, query_pt);
-//			printf("pq result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
-		} else printf("kd pq: no points could be found...\n");
-		kd = elapsed(start, end);
-		total_times[2] += kd;
-
-		pd = fabs(min - dist)/((min + dist)/2) * 100; // percent difference with brute force
-		avr_pd_pq[1] += pd; 
-		if(pd == 0) num_correct[1]++;
+//		// nearest neighbor using priority queue
+//		start = clock();
+//		best = findNearestPoint_pq(kdt, query_pt, range);	
+//		end = clock();
+//		if(best != -1) {
+//			dist = distance_by_idx(kdt, best, query_pt);
+////			printf("pq result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
+//		} else printf("kd pq: no points could be found...\n");
+//		kd = elapsed(start, end);
+//		total_times[2] += kd;
+//
+//		pd = fabs(min - dist)/((min + dist)/2) * 100; // percent difference with brute force
+//		avr_pd_pq[1] += pd; 
+//		if(pd == 0) num_correct[1]++;
 //		printf("distance: %.2f percent different (pq and brute force)\n", pd);	
 //	kdtree_print(kdt);
 //		printf("###\n\n");		

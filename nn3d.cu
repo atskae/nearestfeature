@@ -10,8 +10,9 @@
 extern "C" {
 	#include "jsmn.h" // JSON file parser
 	#include "kdtree.h"
-	#include "pq.h"
 }
+
+#include "pq.cuh"
 
 /*
 	Implementation of "GPU-accelerated Nearest Neighbor Search for 3D Registration" Qiu 2009	
@@ -21,6 +22,11 @@ extern "C" {
 	
 */
 
+/*
+
+	Device
+
+*/
 // Error handling macro
 #define CHECK(function) {															\
 	const cudaError_t error = function;												\
@@ -31,6 +37,13 @@ extern "C" {
 	}																				\
 }
 
+__device__ __constant__ int ARRAY_LIM; // size of the kdtree array in each dimension
+
+/*
+
+	Host
+
+*/
 #define BUFFER_SIZE 1600000
 #define PI 3.14159265358979323846
 #define EARTH_RADIUS 6371 // in km
@@ -223,8 +236,8 @@ double** parseJSON(char* file, int* num_points) {
 				(*num_points)++;
 				if(*num_points == points_buffer_size) {					
 					points_buffer_size = points_buffer_size * 2;
-					points = (double*) realloc(points, points_buffer_size * sizeof(double*));
-					geopoints = (double*) realloc(geopoints, points_buffer_size * sizeof(double*));
+					points = (double**) realloc(points, points_buffer_size * sizeof(double*));
+					geopoints = (double**) realloc(geopoints, points_buffer_size * sizeof(double*));
 					if(!points || !geopoints) {
 						printf("%i %i realloc() failed for buffer size %lu\n", points == 0, geopoints == 0, (*num_points + points_buffer_size) * sizeof(double*));
 						exit(1);
@@ -389,74 +402,86 @@ int findNearestPoint(kdtree* kdt, double* p, double range) {
 
 	return best;	
 }
+//
+//// using priority queue
+//int findNearestPoint_pq(kdtree* kdt, double* p, double range) {
+//
+////	printf("findNearestPoint_pq()\n");
+//
+//	int best = -1;
+//	double dist_best = range;
+//
+//	// initalize priority queue and place root node
+//	pqueue* q = pq_build(PQ_SIZE);
+//	pq_insert(q, 0, distance_by_idx(kdt, 0, p)); // distance to root
+//
+//	int current_node;
+//	double left_dist, right_dist;
+//	int left_idx, right_idx;
+//	double current_dist;
+//	while(q->num_elems != 0) { // while the queue is not empty
+//	// extract the current minimum
+//		current_node = pq_extract();
+////		pq_print(q);
+//
+//		// descend this subtree until we reach a leaf; add the higher distanced' sibling in the queue as we descend the nodes
+//		while(current_node*2+1 <= kdt->array_lim) { // descend until we reach a leaf node
+//			
+//			left_idx = current_node*2 + 1;
+//			right_idx = current_node*2 + 2;
+//
+//			if(kdt->emptys[left_idx] && kdt->emptys[right_idx]) break; // is a leaf node
+//	
+//			left_dist = DBL_MAX;	
+//			right_dist = DBL_MAX;
+//				
+//			// check which children has a shorter distance from the query point
+//			if(!kdt->emptys[left_idx]) left_dist = distance_by_idx(kdt, left_idx, p);
+//			if(!kdt->emptys[right_idx]) right_dist = distance_by_idx(kdt, right_idx, p);
+//	
+//			if(left_dist < right_dist) {
+//				if(!kdt->emptys[right_idx]) pq_insert(q, right_idx, right_dist); // insert the other sibling
+//				current_node = left_idx; // descend to lower distance'd node
+//			} else {
+//				if(!kdt->emptys[left_idx]) pq_insert(q, left_idx, left_dist);				
+//				current_node = right_idx;
+//			}
+//
+//		} // while not at leaf ; end		
+//
+//		// reached leaf node ; update best seen so far
+//		current_dist = distance_by_idx(kdt, current_node, p);
+//
+//		if(current_dist < dist_best) {
+//			best = current_node;
+//			dist_best = current_dist;	
+//		}
+//	}
+//
+//	return best;
+//}
 
-// using priority queue
-int findNearestPoint_pq(kdtree* kdt, double* p, double range) {
-
-//	printf("findNearestPoint_pq()\n");
-
-	int best = -1;
-	double dist_best = range;
-
-	// initalize priority queue and place root node
-	pqueue* q = pq_build(PQ_SIZE);
-	pq_insert(q, 0, distance_by_idx(kdt, 0, p)); // distance to root
-
-	int current_node;
-	double left_dist, right_dist;
-	int left_idx, right_idx;
-	double current_dist;
-	while(q->num_elems != 0) { // while the queue is not empty
-	// extract the current minimum
-		current_node = pq_extract();
-//		pq_print(q);
-
-		// descend this subtree until we reach a leaf; add the higher distanced' sibling in the queue as we descend the nodes
-		while(current_node*2+1 <= kdt->array_lim) { // descend until we reach a leaf node
-			
-			left_idx = current_node*2 + 1;
-			right_idx = current_node*2 + 2;
-
-			if(kdt->emptys[left_idx] && kdt->emptys[right_idx]) break; // is a leaf node
-	
-			left_dist = DBL_MAX;	
-			right_dist = DBL_MAX;
-				
-			// check which children has a shorter distance from the query point
-			if(!kdt->emptys[left_idx]) left_dist = distance_by_idx(kdt, left_idx, p);
-			if(!kdt->emptys[right_idx]) right_dist = distance_by_idx(kdt, right_idx, p);
-	
-			if(left_dist < right_dist) {
-				if(!kdt->emptys[right_idx]) pq_insert(q, right_idx, right_dist); // insert the other sibling
-				current_node = left_idx; // descend to lower distance'd node
-			} else {
-				if(!kdt->emptys[left_idx]) pq_insert(q, left_idx, left_dist);				
-				current_node = right_idx;
-			}
-
-		} // while not at leaf ; end		
-
-		// reached leaf node ; update best seen so far
-		current_dist = distance_by_idx(kdt, current_node, p);
-
-		if(current_dist < dist_best) {
-			best = current_node;
-			dist_best = current_dist;	
-		}
-	}
-
-	return best;
-}
-
-__device__ void device_findNearestPoint(int* results, kdtree* kdt, double* pts_x, double* pts_y, double* pts_z, double range) {
-	
-	int best = -1;
-	double dist_best = range;
-
-	// initalize priority queue and place root node
-	pqueue* q = pq_build(PQ_SIZE);
+// initiated from the host
+__global__ void device_findNearestPoint(int* results, kdtree* kdt, int num_queries, double* pts_x, double* pts_y, double* pts_z, double range) {
 
 	int thread_idx = blockDim.x * blockIdx.x +  threadIdx.x; // unique thread across grid ; blockDim.x = 1024 
+	if(thread_idx > num_queries-1) return;
+
+	printf("thread %i's query point: (%.2f, %.2f, %.2f)\n", thread_idx, pts_x[thread_idx], pts_y[thread_idx], pts_z[thread_idx]);
+	
+	int best = -1;
+	double dist_best = range;
+
+	// initalize priority queue and place root node
+	//pqueue* q = pq_build(PQ_SIZE);
+	pqueue* q = (pqueue*) malloc(sizeof(pqueue));
+	q->max_size = PQ_SIZE;
+	q->num_elems = 0;
+	q->elems = (int*) malloc(sizeof(int) * q->max_size);
+	q->dists = (double*) malloc(sizeof(double) * q->max_size);
+	
+	memset(q->elems, 0, PQ_SIZE * sizeof(int));
+	memset(q->dists, 0, PQ_SIZE * sizeof(double));
 
 	// calculate distance from root
 	double dist = 0;
@@ -473,10 +498,12 @@ __device__ void device_findNearestPoint(int* results, kdtree* kdt, double* pts_x
 	int left_idx, right_idx;
 	while(q->num_elems != 0) { // while the queue is not empty
 		// extract the current minimum
-		current_node = pq_extract();
+		pq_extract(q, &current_node);
+
+		//printf("thread %i extracted node %i\n", thread_idx, current_node);
 
 		// descend this subtree until we reach a leaf; add the higher distanced' sibling in the queue as we descend the nodes
-		while(current_node*2+1 <= kdt->array_lim) { // descend until we reach a leaf node
+		while(current_node*2+1 <= ARRAY_LIM) { // descend until we reach a leaf node
 			
 			left_idx = current_node*2 + 1;
 			right_idx = current_node*2 + 2;
@@ -511,19 +538,22 @@ __device__ void device_findNearestPoint(int* results, kdtree* kdt, double* pts_x
 		} // while not at leaf ; end		
 
 		// reached leaf node ; update best seen so far
-		
+	
+		if(kdt->emptys[current_node]) break;
+	
 		// calculate distance to the current node
 		current_dist += pow((kdt->x[current_node] - pts_x[thread_idx]), 2);	
 		current_dist += pow((kdt->y[current_node] - pts_y[thread_idx]), 2);	
 		current_dist += pow((kdt->z[current_node] - pts_z[thread_idx]), 2);	
-		current_dist = sqrt(current_dist);
+		current_dist = sqrt(current_dist);		
 
 		if(current_dist < dist_best) {
 			best = current_node;
 			dist_best = current_dist;	
 		}
 	}
-
+	
+	printf("thread %i) best %i, dist_best %.2f, point (%.2f, %.2f, %.2f) empty %i\n", thread_idx, best, dist_best, kdt->x[best], kdt->y[best], kdt->z[best], kdt->emptys[best]);
 	results[thread_idx] = best;
 }
 
@@ -549,26 +579,30 @@ int main(int argc, char* argv[]) {
 	end = clock();
 	printf("Build complete. %i points, %i nodes in %.2f ms\n", kdt->num_points, kdt->num_nodes, elapsed(start, end));
 
+	for(int i=0; i<kdt->array_lim; i++) {
+		printf("%i) empty %i (%.2f, %.2f, %.2f)\n", i, kdt->emptys[i], kdt->x[i], kdt->y[i], kdt->z[i]);
+	}
+
 	/* running the nearest neightbor algorithm */ 
-
-	 
-	// stats
-	int num_correct[2] = {0, 0};
-	double avr_pd_pq[2] = {0.0, 0.0}; // average percent difference for priority queue implementation (b/c it is approx)
-	double total_times[3] = {0.0, 0.0, 0.0};
-	
-	double min, dist;
-	int best;
-
-	double lat, longt;	
-	double** query_pts = (double**) malloc(sizeof(double*) * num_queries);
+// 
+//	// stats
+//	int num_correct[2] = {0, 0};
+//	double avr_pd_pq[2] = {0.0, 0.0}; // average percent difference for priority queue implementation (b/c it is approx)
+//	double total_times[3] = {0.0, 0.0, 0.0};
+//	
 	double range = DBL_MAX;
 
+	double min, dist;
+	int best;
+//
+	double lat, longt;	
+	double** query_pts = (double**) malloc(sizeof(double*) * num_queries);
+	
 	// format for coalesced access
 	double* query_pts_x = (double*) malloc(sizeof(double) * num_queries);
 	double* query_pts_y = (double*) malloc(sizeof(double) * num_queries);
 	double* query_pts_z = (double*) malloc(sizeof(double) * num_queries);
-
+//
 	for(int i=0; i<num_queries; i++) {
 
 		// generate a random query
@@ -589,12 +623,11 @@ int main(int argc, char* argv[]) {
 		query_pts_y[i] = query_pts[i][1];
 		query_pts_z[i] = query_pts[i][2];
 
-//		printf("### Query %i: (%.12f, %.12f, %.12f)\n", i, query_pt[0], query_pt[1], query_pt[2]);
+////		printf("### Query %i: (%.12f, %.12f, %.12f)\n", i, query_pt[0], query_pt[1], query_pt[2]);
 		
 		// brute force
 		start = clock();
 		min = range;
-		best = -1;
 		for(int j=0; j<kdt->num_points; j++) {
 			dist = distance(query_pts[i], points[j]);	
 			if(dist < min) {
@@ -603,86 +636,81 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		end = clock();
-		if(best == -1) {
-			printf("Something went wrong...\n");
-			continue;
-		}
-		double bf_best[3];
-		bf_best[0] = points[best][0];
-	 	bf_best[1] = points[best][1];
-		bf_best[2] = points[best][2];
+		printf("bf %i) query point (%.2f, %.2f, %.2f), result (%.2f, %.2f, %.2f), dist %.2f\n", i, query_pts[i][0], query_pts[i][1], query_pts[i][2], points[best][0], points[best][1], points[best][2], min);
+//		double bf_best[3];
+//		bf_best[0] = points[best][0];
+//	 	bf_best[1] = points[best][1];
+//		bf_best[2] = points[best][2];
 		
-//		printf("bf result \t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", points[best][0], points[best][1], points[best][2], min, best);
-		time_t bf = elapsed(start, end);
-		total_times[0] += bf;
-
-		// cpu ; only to verify that a correct tree has been built
-		start = clock();
-		best = findNearestPoint(kdt, query_pts[i], range);	
-		end = clock();
-	
-		double b[3];
-		if(best != -1) {
-			b[0] = kdt->x[best];
-			b[1] = kdt->y[best];
-			b[2] = kdt->z[best];
-			dist = distance(query_pts[i], b);
-//			printf("kd result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
-		} else printf("kd: no points could be found...\n");
-		time_t kd = elapsed(start, end);
-		total_times[1] += kd;
-	
-		double pd = fabs(min - dist)/((min + dist)/2) * 100;
-		avr_pd_pq[0] += pd; 
-
-	//	printf("distance: %.2f percent different\n", pd);	
-		// check for correct answer
-		if(pd != 0) {
-			
-			char found = 0;
-			double d1, d2, d3;
-			
-			for(int i=0; i<kdt->array_lim; i++) {	
-				d1 = fabs(bf_best[0] - kdt->x[i]);
-				d2 = fabs(bf_best[1] - kdt->y[i]);
-				d3 = fabs(bf_best[2] - kdt->z[i]);
-		
-				if(d1 < 1e-32 && d2 < 1e-32 && d3 < 1e-32) {
-//					printf("i=%i, (%.12f, %.12f, %.12f)\n", i, kdt->x[i], kdt->y[i], kdt->z[i]);
-					found = 1;
-					break;
-				}
-			}
-		
-//			if(found) printf("no excuse... there was a point that had a shorter distance in the kdtree :(\n");
-//			else printf("WAAAAAS\n");
-		
-		} else num_correct[0]++;
-	
-		// nearest neighbor using priority queue
-		start = clock();
-		best = findNearestPoint_pq(kdt, query_pts[i], range);	
-		end = clock();
-		if(best != -1) {
-			dist = distance_by_idx(kdt, best, query_pts[i]);
-//			printf("pq result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
-		} else printf("kd pq: no points could be found...\n");
-		kd = elapsed(start, end);
-		total_times[2] += kd;
-
-		pd = fabs(min - dist)/((min + dist)/2) * 100; // percent difference with brute force
-		avr_pd_pq[1] += pd; 
-		if(pd == 0) num_correct[1]++;
-//		printf("distance: %.2f percent different (pq and brute force)\n", pd);	
-//	kdtree_print(kdt);
-//		printf("###\n\n");		
-
+////		printf("bf result \t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", points[best][0], points[best][1], points[best][2], min, best);
+//		time_t bf = elapsed(start, end);
+//		total_times[0] += bf;
+//
+//		// cpu ; only to verify that a correct tree has been built
+//		start = clock();
+//		best = findNearestPoint(kdt, query_pts[i], range);	
+//		end = clock();
+//	
+//		double b[3];
+//		if(best != -1) {
+//			b[0] = kdt->x[best];
+//			b[1] = kdt->y[best];
+//			b[2] = kdt->z[best];
+//			dist = distance(query_pts[i], b);
+////			printf("kd result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
+//		} else printf("kd: no points could be found...\n");
+//		time_t kd = elapsed(start, end);
+//		total_times[1] += kd;
+//	
+//		double pd = fabs(min - dist)/((min + dist)/2) * 100;
+//		avr_pd_pq[0] += pd; 
+//
+//	//	printf("distance: %.2f percent different\n", pd);	
+//		// check for correct answer
+////		if(pd != 0) {
+////			
+////			char found = 0;
+////			double d1, d2, d3;
+////			
+////			for(int i=0; i<kdt->array_lim; i++) {	
+////				d1 = fabs(bf_best[0] - kdt->x[i]);
+////				d2 = fabs(bf_best[1] - kdt->y[i]);
+////				d3 = fabs(bf_best[2] - kdt->z[i]);
+////		
+////				if(d1 < 1e-32 && d2 < 1e-32 && d3 < 1e-32) {
+//////					printf("i=%i, (%.12f, %.12f, %.12f)\n", i, kdt->x[i], kdt->y[i], kdt->z[i]);
+////					found = 1;
+////					break;
+////				}
+////			}
+////		
+//////			if(found) printf("no excuse... there was a point that had a shorter distance in the kdtree :(\n");
+////			else printf("WAAAAAS\n");
+//		
+//		} else num_correct[0]++;	
+//		// nearest neighbor using priority queue
+//	//	start = clock();
+//	//	best = findNearestPoint_pq(kdt, query_pts[i], range);	
+//	//	end = clock();
+//	//	if(best != -1) {
+//	//		dist = distance_by_idx(kdt, best, query_pts[i]);
+////	//		printf("pq result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
+//	//	} else printf("kd pq: no points could be found...\n");
+//	//	kd = elapsed(start, end);
+//	//	total_times[2] += kd;
+//
+//	//	pd = fabs(min - dist)/((min + dist)/2) * 100; // percent difference with brute force
+//	//	avr_pd_pq[1] += pd; 
+//	//	if(pd == 0) num_correct[1]++;
+//	//	printf("distance: %.2f percent different (pq and brute force)\n", pd);	
+//	//	kdtree_print(kdt);
+//	//	printf("###\n\n");		
+//
 	} // each query point ; end 
 
-//	printf("PORQUE\n");	
-	printf("kd: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[0], num_queries, ((float) num_correct[0]/num_queries) * 100, (float)avr_pd_pq[0]/num_queries);
-	printf("pq: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[1], num_queries, ((float) num_correct[1]/num_queries) * 100, (float)avr_pd_pq[1]/num_queries);
-	printf("bf %.2f ms, kd %.2f ms, pq %.2f ms\n", (double) total_times[0]/num_queries, (double) total_times[1]/num_queries, (double) total_times[2]/num_queries);	
+//	printf("kd: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[0], num_queries, ((float) num_correct[0]/num_queries) * 100, (float)avr_pd_pq[0]/num_queries);
+//	printf("pq: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[1], num_queries, ((float) num_correct[1]/num_queries) * 100, (float)avr_pd_pq[1]/num_queries);
+//	printf("bf %.2f ms, kd %.2f ms, pq %.2f ms\n", (double) total_times[0]/num_queries, (double) total_times[1]/num_queries, (double) total_times[2]/num_queries);	
 
 	/* GPU */
 
@@ -705,24 +733,60 @@ int main(int argc, char* argv[]) {
 	CHECK( cudaMemcpy(y_d, query_pts_y, numBytes, cudaMemcpyHostToDevice)  );	
 	CHECK( cudaMemcpy(z_d, query_pts_z, numBytes, cudaMemcpyHostToDevice)  );	
 
-	// transfer kdtree to device
+	// transfer kdtree to page-locked device memory
 	kdtree* kdt_d;	
-	CHECK( cudaMalloc( (kdtree**)&kdt_d, sizeof(kdtree) ) );
+	CHECK( cudaMallocHost( (kdtree**)&kdt_d, sizeof(kdtree) ) );
+	CHECK( cudaMemcpy(kdt_d, kdt, sizeof(kdtree), cudaMemcpyHostToDevice)  );	
 
+	CHECK( cudaMallocHost( (double**)&kdt_d->x, sizeof(double) * kdt->array_lim) );
+	CHECK( cudaMemcpy(kdt_d->x, kdt->x, sizeof(double) * kdt->array_lim, cudaMemcpyHostToDevice)  );	
+
+	CHECK( cudaMallocHost( (double**)&kdt_d->y, sizeof(double) * kdt->array_lim) );
+	CHECK( cudaMemcpy(kdt_d->y, kdt->y, sizeof(double) * kdt->array_lim, cudaMemcpyHostToDevice)  );	
+
+	CHECK( cudaMallocHost( (double**)&kdt_d->z, sizeof(double) * kdt->array_lim) );
+	CHECK( cudaMemcpy(kdt_d->z, kdt->z, sizeof(double) * kdt->array_lim, cudaMemcpyHostToDevice)  );
+
+	// cudaError_t cudaMemcpyToSymbol(const void *symbol, const void * src, size_t count, size_t offset, cudaMemcpyKind kind)
+	CHECK( cudaMemcpyToSymbol( ARRAY_LIM, &kdt->array_lim, sizeof(int), 0, cudaMemcpyHostToDevice ) );	
+
+	CHECK( cudaMallocHost( (char**)&kdt_d->emptys, sizeof(char) * kdt->array_lim ) );
+	CHECK( cudaMemcpy(kdt_d->emptys, kdt->emptys, sizeof(char) * kdt->array_lim, cudaMemcpyHostToDevice)  );
+	
 	// define block and grid size ; max is 1024 per dimension ; 1024 max per block ; so max query points = 1048576 for simple grid dimensions 
 	if(num_queries > 1048576) {
 		// figure out grid calculation...
 		return 0;
 	}
 	// assumes num_queries can fit in 1 dimension (x) in the grid
-	dim3 block(1014); // a strip of threads
-	dim3 grid(1024, 0); // a long array of a strip of threads....
+	printf("Launching %i threads\n", num_queries);
+	dim3 block(num_queries); // a strip of threads
+	dim3 grid(1); // a long array of a strip of threads....
 	printf("Block dimension (x:%d, y:%d)\n", block.x, block.y);	
 	printf("Grid dimension: (x:%d, y:%d)\n", grid.x, grid.y);
 
 	// results array
 	int* results_d;
 	CHECK( cudaMalloc( (int**)&results_d, sizeof(int) * num_queries) );
+
+	// run on GPU
+	printf("Executing kernel\n");
+	device_findNearestPoint <<< grid, block >>> (results_d, kdt_d, num_queries, x_d, y_d, z_d, range);
+	cudaError_t err = cudaGetLastError();
+	if (err != cudaSuccess) printf("Error: %s\n", cudaGetErrorString(err));
+	cudaDeviceSynchronize(); // wait for all the threads to finish
+	// results array on host
+	int* results = (int*) malloc(sizeof(int) * num_queries); 
+	CHECK( cudaMemcpy(results, results_d, sizeof(int) * num_queries, cudaMemcpyDeviceToHost) );	
+
+	printf("Execution done\n");
+	for(int i=0; i<num_queries; i++) {
+		if(results[i] == -1) printf("%i) error\n", i);
+		else printf("%i) result (%.2f, %.2f, %.2f)\n", i, kdt->x[results[i]], kdt->y[results[i]], kdt->z[results[i]]);
+	}
+
+	// Always call this function when ending program
+	cudaDeviceReset();
 
 	return 0;		
 }
