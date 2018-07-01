@@ -5,10 +5,12 @@ typedef struct kdtree {
 	double* x;
 	double* y;
 	double* z;
+	int dim;
 	int num_points;
 	int num_nodes;
 	int array_lim;
 	char* emptys; // keeps track of the empty nodes ; this is used to check if the node is a leaf
+	int* axes;
 } kdtree;
 
 int partition(double** points, int l, int r, int dim); 

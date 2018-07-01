@@ -47,14 +47,14 @@ __device__ __constant__ int ARRAY_LIM; // size of the kdtree array in each dimen
 #define BUFFER_SIZE 1600000
 #define PI 3.14159265358979323846
 #define EARTH_RADIUS 6371 // in km
-#define PQ_SIZE 100 // priority queue size
+//#define PQ_SIZE 1 // priority queue size
 
 #define DIM 3 // dimension of cartesian coordinates
 
 // returns the time elapsed in miliseconds 
 double elapsed(time_t start, time_t end) {
 	double t = ( ((double) (end - start)) / CLOCKS_PER_SEC );	
-//	printf("%.5f ms elapsed.\n", t*1000);
+	printf("%.5f ms elapsed.\n", t*1000);
 	return t*1000;
 }
 
@@ -464,85 +464,96 @@ int findNearestPoint(kdtree* kdt, double* p, double range) {
 // initiated from the host
 __global__ void device_findNearestPoint(int* results, kdtree* kdt, int num_queries, double* pts_x, double* pts_y, double* pts_z, double range) {
 
-	int thread_idx = blockDim.x * blockIdx.x +  threadIdx.x; // unique thread across grid ; blockDim.x = 1024 
+	int thread_idx = blockDim.x * blockIdx.x + threadIdx.x; // unique thread across grid ; blockDim.x = 1024 
 	if(thread_idx > num_queries-1) return;
 
-	printf("thread %i's query point: (%.2f, %.2f, %.2f)\n", thread_idx, pts_x[thread_idx], pts_y[thread_idx], pts_z[thread_idx]);
+//	printf("thread %i's query point: (%.2f, %.2f, %.2f)\n", thread_idx, pts_x[thread_idx], pts_y[thread_idx], pts_z[thread_idx]);
 	
 	int best = -1;
 	double dist_best = range;
 
 	// initalize priority queue and place root node
-	//pqueue* q = pq_build(PQ_SIZE);
 	pqueue* q = (pqueue*) malloc(sizeof(pqueue));
-	q->max_size = PQ_SIZE;
+	if(!q) {
+		printf("Thread %i: malloc pqueue failed\n");
+		return;
+	}
+
+	q->max_size = 1000;
 	q->num_elems = 0;
 	q->elems = (int*) malloc(sizeof(int) * q->max_size);
 	q->dists = (double*) malloc(sizeof(double) * q->max_size);
 	
-	memset(q->elems, 0, PQ_SIZE * sizeof(int));
-	memset(q->dists, 0, PQ_SIZE * sizeof(double));
+	memset(q->elems, 0, q->max_size * sizeof(int));
+	memset(q->dists, 0, q->max_size * sizeof(double));
 
 	// calculate distance from root
-	double dist = 0;
-	dist += pow((kdt->x[0] - pts_x[thread_idx]), 2);	
-	dist += pow((kdt->y[0] - pts_y[thread_idx]), 2);	
-	dist += pow((kdt->z[0] - pts_z[thread_idx]), 2);	
-	dist = sqrt(dist);
-	
+	double dist = pts_x[thread_idx] - kdt->x[0];
 	pq_insert(q, 0, dist); // distance to root
 
 	int current_node;
 	double current_dist;
-	double left_dist, right_dist;
+//	double left_dist, right_dist;
+	int current_axis;
 	int left_idx, right_idx;
 	while(q->num_elems != 0) { // while the queue is not empty
-		// extract the current minimum
-		pq_extract(q, &current_node);
 
-		//printf("thread %i extracted node %i\n", thread_idx, current_node);
+		// extract the current minimum
+		pq_extract(q, &current_node, &current_dist);
+
+		if(current_dist >= dist_best) break;
 
 		// descend this subtree until we reach a leaf; add the higher distanced' sibling in the queue as we descend the nodes
-		while(current_node*2+1 <= ARRAY_LIM) { // descend until we reach a leaf node
+		while(current_node*2+1 <= ARRAY_LIM) { // descend until we reach a leaf node	
 			
 			left_idx = current_node*2 + 1;
 			right_idx = current_node*2 + 2;
 
 			if(kdt->emptys[left_idx] && kdt->emptys[right_idx]) break; // is a leaf node
-	
-			left_dist = DBL_MAX;	
-			right_dist = DBL_MAX;
+
+			current_axis = kdt->axes[current_node];	
 				
-			// check which children has a shorter distance from the query point
-			if(!kdt->emptys[left_idx]) {
-				left_dist += pow((kdt->x[left_idx] - pts_x[thread_idx]), 2);	
-				left_dist += pow((kdt->y[left_idx] - pts_y[thread_idx]), 2);	
-				left_dist += pow((kdt->z[left_idx] - pts_z[thread_idx]), 2);	
-				left_dist = sqrt(left_dist);	
+			// check which side of the kd-tree to visit
+			double* array;
+			double* query;
+			switch(current_axis) {
+				case 0:
+					array = kdt->x;
+					query = pts_x;
+					break;
+				case 1:
+					array = kdt->y;
+					query = pts_y;
+					break;
+				case 2:
+					array = kdt->z;
+					query = pts_z;
+					break;
+				default:
+					printf("Invalid axis %i\n", current_axis);
+					break;
+			}			
+		
+			current_dist = query[thread_idx] - array[current_node]; // distance to split node
+			if(current_dist < 0) { // visit the left child ; add the RIGHT child to the queue for later
+				if(fabs(current_dist) < dist_best && !kdt->emptys[current_node*2 + 2] && q->num_elems < q->max_size) { // there is potential point that is closer than best on the other side
+					pq_insert(q, right_idx, current_dist);
+				}
+				current_node = current_node*2 + 1; // go to left side	
+			} else { // go to right side ; add the LEFT child to the queue later
+				if(fabs(current_dist) < dist_best && !kdt->emptys[current_node*2 + 1] && q->num_elems < q->max_size) { // there is potential point that is closer than best on the other side
+					pq_insert(q, left_idx, current_dist);
+				}
+				current_node = current_node*2 + 2; // go to right side		
 			}
-			if(!kdt->emptys[right_idx]) {
-				right_dist += pow((kdt->x[right_idx] - pts_x[thread_idx]), 2);	
-				right_dist += pow((kdt->y[right_idx] - pts_y[thread_idx]), 2);	
-				right_dist += pow((kdt->z[right_idx] - pts_z[thread_idx]), 2);	
-				right_dist = sqrt(right_dist);				
-			}
-	
-			if(left_dist < right_dist) {
-				if(!kdt->emptys[right_idx]) pq_insert(q, right_idx, right_dist); // insert the other sibling
-				current_node = left_idx; // descend to lower distance'd node
-			} else {
-				if(!kdt->emptys[left_idx]) pq_insert(q, left_idx, left_dist);				
-				current_node = right_idx;
-			}
+
+						
 
 		} // while not at leaf ; end		
 
-		// reached leaf node ; update best seen so far
-	
-		if(kdt->emptys[current_node]) break;
-	
-		// calculate distance to the current node
-		current_dist += pow((kdt->x[current_node] - pts_x[thread_idx]), 2);	
+		// reached leaf node ; update best seen so far		
+		// calculate distance to the current node	
+		current_dist = pow((kdt->x[current_node] - pts_x[thread_idx]), 2); // overwrite old current_dist	
 		current_dist += pow((kdt->y[current_node] - pts_y[thread_idx]), 2);	
 		current_dist += pow((kdt->z[current_node] - pts_z[thread_idx]), 2);	
 		current_dist = sqrt(current_dist);		
@@ -579,10 +590,6 @@ int main(int argc, char* argv[]) {
 	end = clock();
 	printf("Build complete. %i points, %i nodes in %.2f ms\n", kdt->num_points, kdt->num_nodes, elapsed(start, end));
 
-	for(int i=0; i<kdt->array_lim; i++) {
-		printf("%i) empty %i (%.2f, %.2f, %.2f)\n", i, kdt->emptys[i], kdt->x[i], kdt->y[i], kdt->z[i]);
-	}
-
 	/* running the nearest neightbor algorithm */ 
 // 
 //	// stats
@@ -593,7 +600,7 @@ int main(int argc, char* argv[]) {
 	double range = DBL_MAX;
 
 	double min, dist;
-	int best;
+	int best[num_queries];
 //
 	double lat, longt;	
 	double** query_pts = (double**) malloc(sizeof(double*) * num_queries);
@@ -602,11 +609,10 @@ int main(int argc, char* argv[]) {
 	double* query_pts_x = (double*) malloc(sizeof(double) * num_queries);
 	double* query_pts_y = (double*) malloc(sizeof(double) * num_queries);
 	double* query_pts_z = (double*) malloc(sizeof(double) * num_queries);
-//
-	for(int i=0; i<num_queries; i++) {
 
-		// generate a random query
-	
+	// generate a random query
+	for(int i=0; i<num_queries; i++) {
+			
 		lat = (double) (-90) + ( (rand() * (1.0/(RAND_MAX + 1.0))) * (90 - (-90)));
 		longt = (double) (-180) + ( (rand() * (1.0/(RAND_MAX + 1.0))) * (180 - (-180)));
 
@@ -624,19 +630,25 @@ int main(int argc, char* argv[]) {
 		query_pts_z[i] = query_pts[i][2];
 
 ////		printf("### Query %i: (%.12f, %.12f, %.12f)\n", i, query_pt[0], query_pt[1], query_pt[2]);
+	} // generate random query points end
 		
-		// brute force
-		start = clock();
+	// brute force
+	start = clock();
+	for(int i=0; i<num_queries; i++) {
 		min = range;
 		for(int j=0; j<kdt->num_points; j++) {
 			dist = distance(query_pts[i], points[j]);	
 			if(dist < min) {
 				min = dist; 
-				best = j;
+				best[i] = j;
 			}
 		}
-		end = clock();
-		printf("bf %i) query point (%.2f, %.2f, %.2f), result (%.2f, %.2f, %.2f), dist %.2f\n", i, query_pts[i][0], query_pts[i][1], query_pts[i][2], points[best][0], points[best][1], points[best][2], min);
+		printf("bf %i) result (%.2f, %.2f, %.2f), dist %.2f\n", i, points[best[i]][0], points[best[i]][1], points[best[i]][2], min);
+
+	}
+	end = clock();
+	printf("Brute force time for %i queries: ", num_queries);
+	elapsed(start, end);
 //		double bf_best[3];
 //		bf_best[0] = points[best][0];
 //	 	bf_best[1] = points[best][1];
@@ -706,7 +718,6 @@ int main(int argc, char* argv[]) {
 //	//	kdtree_print(kdt);
 //	//	printf("###\n\n");		
 //
-	} // each query point ; end 
 
 //	printf("kd: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[0], num_queries, ((float) num_correct[0]/num_queries) * 100, (float)avr_pd_pq[0]/num_queries);
 //	printf("pq: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[1], num_queries, ((float) num_correct[1]/num_queries) * 100, (float)avr_pd_pq[1]/num_queries);
@@ -721,6 +732,7 @@ int main(int argc, char* argv[]) {
 	printf("Using device %i:%s\n", dev, dp.name);
 	CHECK( cudaSetDevice(dev) );
 
+	start = clock();
 	// transfer query points to device
 	double *x_d, *y_d, *z_d;
 	int numBytes = num_queries * sizeof(double);
@@ -738,20 +750,26 @@ int main(int argc, char* argv[]) {
 	CHECK( cudaMallocHost( (kdtree**)&kdt_d, sizeof(kdtree) ) );
 	CHECK( cudaMemcpy(kdt_d, kdt, sizeof(kdtree), cudaMemcpyHostToDevice)  );	
 
-	CHECK( cudaMallocHost( (double**)&kdt_d->x, sizeof(double) * kdt->array_lim) );
-	CHECK( cudaMemcpy(kdt_d->x, kdt->x, sizeof(double) * kdt->array_lim, cudaMemcpyHostToDevice)  );	
+	numBytes = sizeof(double) * (kdt->array_lim+1);
+	CHECK( cudaMallocHost( (double**)&kdt_d->x, numBytes) );
+	CHECK( cudaMemcpy(kdt_d->x, kdt->x, numBytes, cudaMemcpyHostToDevice)  );	
 
-	CHECK( cudaMallocHost( (double**)&kdt_d->y, sizeof(double) * kdt->array_lim) );
-	CHECK( cudaMemcpy(kdt_d->y, kdt->y, sizeof(double) * kdt->array_lim, cudaMemcpyHostToDevice)  );	
+	CHECK( cudaMallocHost( (double**)&kdt_d->y, numBytes) );
+	CHECK( cudaMemcpy(kdt_d->y, kdt->y, numBytes, cudaMemcpyHostToDevice)  );	
 
-	CHECK( cudaMallocHost( (double**)&kdt_d->z, sizeof(double) * kdt->array_lim) );
-	CHECK( cudaMemcpy(kdt_d->z, kdt->z, sizeof(double) * kdt->array_lim, cudaMemcpyHostToDevice)  );
+	CHECK( cudaMallocHost( (double**)&kdt_d->z, numBytes) );
+	CHECK( cudaMemcpy(kdt_d->z, kdt->z, numBytes, cudaMemcpyHostToDevice)  );
 
 	// cudaError_t cudaMemcpyToSymbol(const void *symbol, const void * src, size_t count, size_t offset, cudaMemcpyKind kind)
-	CHECK( cudaMemcpyToSymbol( ARRAY_LIM, &kdt->array_lim, sizeof(int), 0, cudaMemcpyHostToDevice ) );	
+	CHECK( cudaMemcpyToSymbol( ARRAY_LIM, &kdt->array_lim, sizeof(int), 0, cudaMemcpyHostToDevice) );	
 
-	CHECK( cudaMallocHost( (char**)&kdt_d->emptys, sizeof(char) * kdt->array_lim ) );
-	CHECK( cudaMemcpy(kdt_d->emptys, kdt->emptys, sizeof(char) * kdt->array_lim, cudaMemcpyHostToDevice)  );
+	numBytes = sizeof(char) * (kdt->array_lim+1);
+	CHECK( cudaMallocHost( (char**)&kdt_d->emptys, numBytes) );
+	CHECK( cudaMemcpy(kdt_d->emptys, kdt->emptys, numBytes, cudaMemcpyHostToDevice)  );
+
+	numBytes = sizeof(int) * (kdt->array_lim+1);
+	CHECK( cudaMallocHost( (char**)&kdt_d->axes, numBytes) );
+	CHECK( cudaMemcpy(kdt_d->axes, kdt->axes, numBytes, cudaMemcpyHostToDevice)  );
 	
 	// define block and grid size ; max is 1024 per dimension ; 1024 max per block ; so max query points = 1048576 for simple grid dimensions 
 	if(num_queries > 1048576) {
@@ -759,18 +777,22 @@ int main(int argc, char* argv[]) {
 		return 0;
 	}
 	// assumes num_queries can fit in 1 dimension (x) in the grid
-	printf("Launching %i threads\n", num_queries);
+//	printf("Launching %i threads\n", num_queries);
 	dim3 block(num_queries); // a strip of threads
-	dim3 grid(1); // a long array of a strip of threads....
-	printf("Block dimension (x:%d, y:%d)\n", block.x, block.y);	
-	printf("Grid dimension: (x:%d, y:%d)\n", grid.x, grid.y);
+	dim3 grid(1024/num_queries + 1); // a long array of a strip of threads....
+//	printf("Block dimension (x:%d, y:%d)\n", block.x, block.y);	
+//	printf("Grid dimension: (x:%d, y:%d)\n", grid.x, grid.y);
 
 	// results array
 	int* results_d;
 	CHECK( cudaMalloc( (int**)&results_d, sizeof(int) * num_queries) );
+	end = clock();
+	printf("Tranfer to device time: ");
+	elapsed(start, end);
 
+	start = clock();
 	// run on GPU
-	printf("Executing kernel\n");
+//	printf("Executing kernel\n");
 	device_findNearestPoint <<< grid, block >>> (results_d, kdt_d, num_queries, x_d, y_d, z_d, range);
 	cudaError_t err = cudaGetLastError();
 	if (err != cudaSuccess) printf("Error: %s\n", cudaGetErrorString(err));
@@ -778,13 +800,38 @@ int main(int argc, char* argv[]) {
 	// results array on host
 	int* results = (int*) malloc(sizeof(int) * num_queries); 
 	CHECK( cudaMemcpy(results, results_d, sizeof(int) * num_queries, cudaMemcpyDeviceToHost) );	
+	end = clock();
 
-	printf("Execution done\n");
+	printf("GPU time for %i queries: ", num_queries);
+	elapsed(start, end);
+
+	int num_correct = 0;
+	double avr_pdif = 0.0; // average percent difference
 	for(int i=0; i<num_queries; i++) {
 		if(results[i] == -1) printf("%i) error\n", i);
-		else printf("%i) result (%.2f, %.2f, %.2f)\n", i, kdt->x[results[i]], kdt->y[results[i]], kdt->z[results[i]]);
+		else {
+//			printf("%i) result (%.2f, %.2f, %.2f) idx = %i\n", i, kdt->x[results[i]], kdt->y[results[i]], kdt->z[results[i]], results[i]);
+			char correct = 1;
+			if( abs(points[best[i]][0] - kdt->x[results[i]]) > 1e-32) correct = 0;
+			if( abs(points[best[i]][1] - kdt->y[results[i]]) > 1e-32) correct = 0;
+			if( abs(points[best[i]][2] - kdt->z[results[i]]) > 1e-32) correct = 0;
+			
+			if(correct) num_correct++;
+			else {
+				double dist = distance(query_pts[i], points[best[i]]);	
+				double dist2;	
+				dist2 = pow((kdt->x[results[i]] - query_pts[0][i]), 2);	
+				dist2 += pow((kdt->y[results[i]] - query_pts[1][i]), 2);	
+				dist2 += pow((kdt->z[results[i]] - query_pts[2][i]), 2);	
+				dist2 = sqrt(dist2);
+					
+				avr_pdif += (float) (abs(dist - dist2)/((float)(dist + dist2)/2)) * 100;
+			} 
+		}
 	}
 
+	printf("GPU accuracy: %.2f %% (%i correct out of %i queries)\n", (float)num_correct/num_queries * 100, num_correct, num_queries);
+	printf("Average GPU distance error: %.2f %%\n", (double)avr_pdif/num_queries);
 	// Always call this function when ending program
 	cudaDeviceReset();
 

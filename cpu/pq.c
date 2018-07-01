@@ -126,7 +126,7 @@ int pq_extract(pqueue* q) {
 	
 	// heapify down
 	heapify_down(q);	
-	
+
 	return min;
 }
 

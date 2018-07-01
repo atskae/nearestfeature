@@ -13,6 +13,6 @@ typedef struct pqueue {
 //pqueue* pq_build(int size);
 
 __device__ void pq_insert(pqueue* q, int new_idx, double new_dist); // returns -1 if the heap is full
-__device__ void pq_extract(pqueue* q, int* value); // sets the index in the kdtree to value
+__device__ void pq_extract(pqueue* q, int* value, double* dist); // sets the index in the kdtree to value
  
 #endif

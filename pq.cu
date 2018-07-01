@@ -132,7 +132,7 @@ __device__ void pq_insert(pqueue* q, int new_idx, double new_dist) {
 }
 
 // returns the index of the kdtree which contains the shortest distance from the query point so far
-__device__ void pq_extract(pqueue* q, int* result) {
+__device__ void pq_extract(pqueue* q, int* result, double* dist) {
 //	printf("pq_extract()\n");
 	if(q->num_elems == 0) {
 		*result = -1;
@@ -141,6 +141,7 @@ __device__ void pq_extract(pqueue* q, int* result) {
 
 	// extract the minimum element
 	int min = q->elems[0];
+	double d = q->dists[0];
 	q->num_elems--;
 
 	// move the last element to the front
@@ -174,7 +175,9 @@ __device__ void pq_extract(pqueue* q, int* result) {
 		idx = smaller_child;	
 	}
 
-	*result = min; 
+	*result = min;
+	*dist = d; 
+
 	return;
 }
 

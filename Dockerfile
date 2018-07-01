@@ -6,10 +6,10 @@ ADD simpleDeviceQuery.cu /app/simpleDeviceQuery.cu
 ADD geojson/gis_vector_rivers.geojson /app/gis_vector_rivers.geojson
 ADD geojson/points.geojson /app/points.geojson
 
-ADD jsmn.h /app/jsmn.h
-ADD jsmn.c /app/jsmn.c
-ADD kdtree.h /app/kdtree.h
-ADD kdtree.c /app/kdtree.c
+ADD cpu/jsmn.h /app/jsmn.h
+ADD cpu/jsmn.c /app/jsmn.c
+ADD cpu/kdtree.h /app/kdtree.h
+ADD cpu/kdtree.c /app/kdtree.c
 ADD pq.cuh /app/pq.cuh
 ADD pq.cu /app/pq.cu
 ADD nn3d.cu /app/nn3d.cu
@@ -22,6 +22,7 @@ WORKDIR app
 
 RUN nvcc simpleDeviceQuery.cu -o sdq
 RUN nvcc --relocatable-device-code true -g -G jsmn.c kdtree.c pq.cu nn3d.cu -o nn3d
+#RUN nvcc --relocatable-device-code true -lineinfo -Xcompiler -rdynamic jsmn.c kdtree.c pq.cu nn3d.cu -o nn3d
 
 ENTRYPOINT ./sdq 
 #ENTRYPOINT 
