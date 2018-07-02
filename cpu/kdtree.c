@@ -12,6 +12,11 @@
 
 #include "kdtree.h"
 
+int max_leaf_idx = 0;
+double INVALID_X = 0.0; // to indicate inner nodes that are empty ;
+
+double getRadians(double degrees) { return (degrees * PI)/180; }
+
 int partition(double** points, int l, int r, int dim) {
 	
 	int swap = l+1;
@@ -212,7 +217,165 @@ kdtree* kdtree_build(double** points, int num_points) {
 	quicksort(points, 0, num_points-1, 0); // sort in the first axis 
 	printf("kdtree_build_r\n");
 	kdtree_build_r(points, 0, kdt, 0, num_points-1, 0);	
-	//	kdtree_print(kdt);
+//	kdtree_print(kdt);
+
+	return kdt;
+}
+
+void kdtree_build_gpu_r(double** points, int axis, kdtree* kdt, int l, int r, int index, double** pts_x, double** pts_y, double** pts_z) {
+
+	// base case: leaf node ; point
+	if(r == l || l > r || r-l == 0) {
+	
+		// if need to allocate more memory
+		if(index*2 + 2 > kdt->len_nodes-1) {			
+			int prev_lim = kdt->len_nodes - 1;
+			kdt->len_nodes = (index*2 + 2) + 1; // index of the right child
+			kdt->leaves = realloc(kdt->leaves, kdt->len_nodes/8 + 1);			
+			if(!kdt->leaves) {
+				printf("Realloc kdt->emptys failed\n");
+				return;
+			}
+			// set newly allocated nodes to not leaves	
+			for(int i=prev_lim; i<kdt->len_nodes/8 + 1; i++) {
+				kdt->leaves[i] = 0;
+			}
+	
+			int num_bytes = kdt->len_nodes * sizeof(double); 			
+			*pts_x = realloc(*pts_x, num_bytes);
+			*pts_y = realloc(*pts_y, num_bytes);
+			*pts_z = realloc(*pts_z, num_bytes);	
+			if(!(*pts_x) || !(*pts_y) || !(*pts_z) ) {
+				printf("kdtree_build_r() realloc failed for new buffer size %i\n", num_bytes);
+				return;
+			}
+		}
+		(*pts_x)[index] = points[r][0]; // x
+		(*pts_y)[index] = points[r][1]; // y
+		(*pts_z)[index] = points[r][2]; // z 
+		kdt->num_nodes++;
+
+	//	printf("leaf is built!: idx=%i ", index);
+	//	printf("(%.2f, %.2f, %.2f)\n", (*pts_x)[index], (*pts_y)[index], (*pts_z)[index]);
+		// set this bit to indicate that this node is a leaf
+		kdt->leaves[index/8] |= 0x1<<(index%8);
+		max_leaf_idx = (index > max_leaf_idx) ? index : max_leaf_idx;
+		
+		// mark that the leaf nodes are empty
+		(*pts_x)[index*2 + 1] = INVALID_X;
+		(*pts_x)[index*2 + 2] = INVALID_X;	
+
+		return;
+	} // if leaf ; end
+	
+	int split_index = l + (r-l)/2; // median index of the sorted points
+	double split;
+	if( ((r-l)+1)%2 == 0) split = (points[split_index][axis] + points[split_index+1][axis])/2; // even number of elements 
+	else split = points[split_index][axis]; // odd number of elments
+
+	// if need to allocate more memory
+	if(index*2 + 2 > kdt->len_nodes-1) {			
+		int prev_lim = kdt->len_nodes - 1;
+		kdt->len_nodes = (index*2 + 2) + 1; // index of the right child
+		kdt->leaves = realloc(kdt->leaves, kdt->len_nodes/8 + 1);			
+		if(!kdt->leaves) {
+			printf("Realloc kdt->emptys failed\n");
+			return;
+		}
+		// set newly allocated nodes to not leaves	
+		for(int i=prev_lim; i<kdt->len_nodes/8 + 1; i++) {
+			kdt->leaves[i] = 0;
+		}
+
+		int num_bytes = kdt->len_nodes * sizeof(double); 			
+		*pts_x = realloc(*pts_x, num_bytes);
+		*pts_y = realloc(*pts_y, num_bytes);
+		*pts_z = realloc(*pts_z, num_bytes);	
+		if(!(*pts_x) || !(*pts_y) || !(*pts_z) ) {
+			printf("kdtree_build_r() realloc failed for new buffer size %i\n", num_bytes);
+			return;
+		}
+	}
+	
+	(*pts_x)[index] = 0;
+	(*pts_y)[index] = 0;
+	(*pts_z)[index] = 0;
+	
+	switch(axis) {
+		case 0:
+			(*pts_x)[index] = split;
+			break;
+		case 1:
+			(*pts_y)[index] = split;
+			break;
+		case 2:
+			(*pts_z)[index] = split;
+			break;
+		default:
+			printf("This should never happen.\n");
+			break;	
+	}
+	kdt->num_nodes++;
+	
+	// left child	
+	quicksort(points, l, split_index, (axis+1)%3); // sort in the next axis 
+	kdtree_build_gpu_r(points, (axis+1)%3, kdt, l, split_index, 2*index + 1, pts_x, pts_y, pts_z);	
+
+	// right child
+	quicksort(points, split_index+1, r, (axis+1)%3); // sort in the next axis 
+	kdtree_build_gpu_r(points, (axis+1)%3, kdt, split_index+1, r, 2*index + 2, pts_x, pts_y, pts_z);	
+
+}
+
+kdtree* kdtree_build_gpu(double** points, int num_points) {
+
+	double invalid = getRadians(-1); // longitude value can never be -1
+	INVALID_X = EARTH_RADIUS * cos(invalid) * cos(invalid); 
+	
+	kdtree* kdt = (kdtree*) malloc(sizeof(kdtree));
+	kdt->len_nodes = num_points * 2; // the length of the nodes array
+	kdt->leaves = (char*) malloc( (kdt->len_nodes/8 + 1) * sizeof(char)); // a bitmap of the leaf nodes ; 8 bits/char 
+	if(!kdt->len_nodes || !kdt->leaves) {
+		printf("malloc() kdt->len_nodes or kdt->leaves failed\n");
+		return NULL;
+	}
+	memset(kdt->leaves, 0, kdt->len_nodes/8 + 1); // bitmap that indicates which nodes are leaves
+	
+	int num_bytes = kdt->len_nodes * sizeof(double);	
+	double* pts_x = malloc(num_bytes);
+	double* pts_y = malloc(num_bytes);
+	double* pts_z = malloc(num_bytes);
+	if(!pts_x || !pts_y || !pts_z) {
+		printf("malloc() pts failed\n");
+		return NULL;
+	}
+
+	quicksort(points, 0, num_points-1, 0); // sort in the first axis 
+	printf("kdtree_build_gpu_r\n");
+	kdtree_build_gpu_r(points, 0, kdt, 0, num_points-1, 0, &pts_x, &pts_y, &pts_z);	
+
+	kdt->len_nodes = max_leaf_idx + 1;
+	num_bytes = kdt->len_nodes * sizeof(double);	
+	kdt->nodes = malloc(num_bytes * 3); // for each dimension x,y,z
+	memcpy(kdt->nodes, pts_x, num_bytes);
+	memcpy(kdt->nodes + kdt->len_nodes, pts_y, num_bytes);
+	memcpy(kdt->nodes + kdt->len_nodes*2, pts_z, num_bytes);
+
+	free(pts_x);
+	free(pts_y);
+	free(pts_z);
+
+	kdt->leaves = realloc(kdt->leaves, kdt->len_nodes/8 + 1);
+
+//	printf("kdtree in 1D array format\n");
+//	for(int i=0; i<kdt->len_nodes; i++) {
+//		if( fabs(kdt->nodes[i] - INVALID_X) < 1e-32) {
+//			printf("idx=%i) null\n", i);
+//			continue;
+//		}
+//		if(kdt->leaves[i/8] & (0x1 << (i%8))) printf("**leaf** ");
+//		printf("idx=%i) (%.2f, %.2f, %.2f)\n", i, kdt->nodes[kdt->len_nodes*0 + i], kdt->nodes[kdt->len_nodes*1 + i], kdt->nodes[kdt->len_nodes*2 + i]);
+//	}
 
 	return kdt;
 }
