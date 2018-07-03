@@ -26,12 +26,12 @@
 
 // returns the time elapsed in miliseconds 
 double elapsed(time_t start, time_t end) {
-	double t = ( ((double) (end - start)) / CLOCKS_PER_SEC );	
-	printf("%.5f ms elapsed.\n", t*1000);
-	return t*1000;
+	double t = ( ((double) (end - start)) / CLOCKS_PER_SEC ) * 1000;	
+//	printf("%.5f ms elapsed.\n", t);
+	return t;
 }
 
-double getRadians(double degrees) { return (degrees * PI)/180; }
+//double getRadians(double degrees) { return (degrees * PI)/180; }
 
 // calculates the distance between cartesian points
 double distance(double* a, double* b) {
@@ -284,10 +284,10 @@ void findBetter(kdtree* kdt, int idx, int axis, double* p, int* best, double* di
 				split = kdt->x[idx];
 				break;	
 			case 1:
-				split = kdt->x[idx];
+				split = kdt->y[idx];
 				break;	
 			case 2:
-				split = kdt->x[idx];
+				split = kdt->z[idx];
 				break;	
 			default:
 				printf("This should never happen.\n");
@@ -332,8 +332,6 @@ void findNearestPoint_r(kdtree* kdt, int idx, int axis, double* p, int* best, do
 		}
 		return;
 	}
-
-	
 	
 //	double split = kdt->x[idx] + kdt->y[idx] + kdt->z[idx];
 	double split;
@@ -342,10 +340,10 @@ void findNearestPoint_r(kdtree* kdt, int idx, int axis, double* p, int* best, do
 			split = kdt->x[idx];
 			break;	
 		case 1:
-			split = kdt->x[idx];
+			split = kdt->y[idx];
 			break;	
 		case 2:
-			split = kdt->x[idx];
+			split = kdt->z[idx];
 			break;	
 		default:
 			printf("This should never happen.\n");
@@ -359,10 +357,10 @@ void findNearestPoint_r(kdtree* kdt, int idx, int axis, double* p, int* best, do
 
 	if(p[axis] > split) {
 		findNearestPoint_r(kdt, (idx*2 + 2), next_axis, p, best, dist_best); // go to right side	
-		findBetter(kdt, (idx*2 + 1), next_axis, p, best, dist_best); 
+		if(fabs(p[axis] - split) < *dist_best) findBetter(kdt, (idx*2 + 1), next_axis, p, best, dist_best); 
 	} else {
 		findNearestPoint_r(kdt, (idx*2 + 1), next_axis, p, best, dist_best); // go to left side
-		findBetter(kdt, (idx*2 + 2), next_axis, p, best, dist_best);
+		if(fabs(p[axis] - split) < *dist_best) findBetter(kdt, (idx*2 + 2), next_axis, p, best, dist_best);
 	}
 }
 
@@ -380,6 +378,34 @@ int findNearestPoint(kdtree* kdt, double* p, double range) {
 	return best;	
 }
 
+/*
+	CPU 
+*/
+
+void findNearestPoint_cpu(double** points, node* n, double* p, int* best, double* dist_best) {
+
+	// base case: leaf node
+	if(n->leaf) {
+		double dist = distance(p, points[n->p]);	
+		if(dist < *dist_best) {
+			*dist_best = dist;
+			*best = n->p;
+		}
+		return;
+	}
+
+	double dist = fabs(p[n->axis] - n->split);	
+	if(p[n->axis] > n->split) { // visit the right side
+		if(n->right) findNearestPoint_cpu(points, n->right, p, best, dist_best);
+		// check for potentially closer nodes on the other side	
+		if(n->left && dist < *dist_best) findNearestPoint_cpu(points, n->left, p, best, dist_best); 
+	} else { // visit the left side
+		if(n->left) findNearestPoint_cpu(points, n->left, p, best, dist_best);
+		// check for potentially closer nodes on the other side
+		if(n->right && dist < *dist_best) findNearestPoint_cpu(points, n->right, p, best, dist_best);
+	}
+}
+
 // using priority queue
 int findNearestPoint_pq(kdtree* kdt, double* p, double range) {
 
@@ -389,7 +415,7 @@ int findNearestPoint_pq(kdtree* kdt, double* p, double range) {
 
 	// initalize priority queue and place root node
 	pqueue* q = pq_build(PQ_SIZE);
-	pq_insert(q, 0, p[0] - kdt->x[0]); // distance to root
+	pq_insert(q, 0, fabs(p[0] - kdt->x[0]) ); // distance to root
 
 	int current_node;
 //	double left_dist, right_dist;
@@ -431,12 +457,12 @@ int findNearestPoint_pq(kdtree* kdt, double* p, double range) {
 			current_dist = p[current_axis] - array[current_node]; // distance to split node
 			if(current_dist < 0) { // visit the left child ; add the RIGHT child to the queue for later
 				if(fabs(current_dist) < dist_best && !kdt->emptys[current_node*2 + 2] && q->num_elems < q->max_size) { // there is potential point that is closer than best on the other side
-					pq_insert(q, right_idx, current_dist);
+					pq_insert(q, right_idx, fabs(current_dist) );
 				}
 				current_node = current_node*2 + 1; // go to left side	
 			} else { // go to right side ; add the LEFT child to the queue later
 				if(fabs(current_dist) < dist_best && !kdt->emptys[current_node*2 + 1] && q->num_elems < q->max_size) { // there is potential point that is closer than best on the other side
-					pq_insert(q, left_idx, current_dist);
+					pq_insert(q, left_idx, fabs(current_dist) );
 				}
 				current_node = current_node*2 + 2; // go to right side		
 			}
@@ -478,13 +504,24 @@ int main(int argc, char* argv[]) {
 	end = clock();
 	printf("Build complete. %i points, %i nodes in %.2f ms\n", kdt->num_points, kdt->num_nodes, elapsed(start, end));
 
+	start = clock();
+	node* kdt_cpu = kdtree_build_cpu(points, num_points);
+	end = clock();
+	printf("CPU kdtree build complete in %.2f ms\n", elapsed(start, end));
+	int best_cpu;
+	double dist_best_cpu;
+	
 	/* running the nearest neightbor algorithm */ 
 	 
 	// stats
 	int num_correct[2] = {0, 0};
 	double avr_pd_pq[2] = {0.0, 0.0}; // average percent difference for priority queue implementation (b/c it is approx)
 	double total_times[3] = {0.0, 0.0, 0.0};
-	
+
+	int num_correct_cpu = 0;
+	double total_time_cpu = 0.0;
+	double pd_cpu = 0.0;	
+
 	double min, dist;
 	int best;
 
@@ -519,22 +556,44 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		end = clock();
+		//printf("start =%li, end=%li, %.2f\n", start, end,  (((double) (end - start)) / CLOCKS_PER_SEC) * 1000 );
+		double bf = elapsed(start, end);
+		total_times[0] += bf;	
+
 		if(best == -1) {
 			printf("Something went wrong...\n");
 			continue;
 		}
+
 		double bf_best[3];
 		bf_best[0] = points[best][0];
 	 	bf_best[1] = points[best][1];
 		bf_best[2] = points[best][2];
 		
-		printf("bf result \t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", points[best][0], points[best][1], points[best][2], min, best);
-		time_t bf = elapsed(start, end);
-		total_times[0] += bf;
+//		printf("bf result \t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", points[best][0], points[best][1], points[best][2], min, best);
 
-		// cpu ; only to verify that a correct tree has been built
+		/*
+			CPU kdtree (node structs)
+		*/
+		best_cpu = -1; // index of the points array
+		dist_best_cpu = DBL_MAX;
 		start = clock();
-//		best = findNearestPoint(kdt, query_pt, range);	
+		findNearestPoint_cpu(points, kdt_cpu, query_pt, &best_cpu, &dist_best_cpu);
+		end = clock();
+		total_time_cpu += elapsed(start, end);
+		//printf("CPU elapsed: %.2f ms\n", elapsed(start, end));
+		double cpu_dist = 0.0;
+		if(best != -1) {
+			cpu_dist = distance(points[best_cpu], query_pt);
+			if(fabs(cpu_dist - min) <= 1e-32) num_correct_cpu++;
+	
+		} else if(best != -1) {
+			pd_cpu += fabs(min - cpu_dist)/((min + cpu_dist)/2) * 100;	
+		} else printf("CPU error\n");
+
+		// cpu but gpu-optimized kdtree; only to verify that a correct tree has been built
+		start = clock();
+		best = findNearestPoint(kdt, query_pt, range);	
 		end = clock();
 	
 		double b[3];
@@ -545,14 +604,15 @@ int main(int argc, char* argv[]) {
 			dist = distance(query_pt, b);
 //			printf("kd result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
 		} else printf("kd: no points could be found...\n");
-		time_t kd = elapsed(start, end);
+		double kd;
+		kd = elapsed(start, end);
 		total_times[1] += kd;
-	
-		double pd = fabs(min - dist)/((min + dist)/2) * 100;
+		double pd;
+		pd = fabs(min - dist)/((min + dist)/2) * 100;
 		avr_pd_pq[0] += pd; 
 
-	//	printf("distance: %.2f percent different\n", pd);	
-		// check for correct answer
+		//printf("distance: %.2f percent different\n", pd);	
+	  // check for correct answer
 		if(pd != 0) {
 			
 			char found = 0;
@@ -581,7 +641,7 @@ int main(int argc, char* argv[]) {
 		end = clock();
 		if(best != -1) {
 			dist = distance_by_idx(kdt, best, query_pt);
-			printf("pq result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i\n", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
+//			printf("pq result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i\n", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
 		} else printf("kd pq: no points could be found...\n");
 		kd = elapsed(start, end);
 		total_times[2] += kd;
@@ -589,16 +649,16 @@ int main(int argc, char* argv[]) {
 		pd = fabs(min - dist)/((min + dist)/2) * 100; // percent difference with brute force
 		avr_pd_pq[1] += pd; 
 		if(pd == 0) num_correct[1]++;
-		printf("distance: %.2f percent different (pq and brute force)\n", pd);	
+//		printf("distance: %.2f percent different (pq and brute force)\n", pd);	
 		//kdtree_print(kdt);
-		printf("###\n\n");		
+//		printf("###\n\n");		
 
 	} // each query point ; end 
 
-	printf("bf: %.2f, pq: %.2f\n", total_times[0], total_times[2]);
-//	printf("PORQUE\n");	
-	//printf("kd: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[0], num_queries, ((float) num_correct[0]/num_queries) * 100, (float)avr_pd_pq[0]/num_queries);
-	printf("pq: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[1], num_queries, ((float) num_correct[1]/num_queries) * 100, (float)avr_pd_pq[1]/num_queries);
+	printf("bf: %.5f, CPU-optimized: %.2f, pq: %.5f\n", total_times[0], total_time_cpu, total_times[2]);
+//	printf("kd: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[0], num_queries, ((float) num_correct[0]/num_queries) * 100, (float)avr_pd_pq[0]/num_queries);
+	printf("cp: %i correct out of %i queries (%.2f%% accuracy)\taverage pd: %.2f %%\n", num_correct_cpu, num_queries, (double)num_correct_cpu/num_queries * 100, (double)pd_cpu/num_queries);
+	printf("pq: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[1], num_queries, ((float) num_correct[1]/num_queries) * 100, (double)avr_pd_pq[1]/num_queries);
 //	printf("bf %.5f ms, kd %.5f ms, pq %.5f ms\n", (double) total_times[0]/num_queries, (double) total_times[1]/num_queries, (double) total_times[2]/num_queries);	
 
 	return 0;		

@@ -12,6 +12,12 @@
 
 #include "kdtree.h"
 
+/*
+	
+	GPU
+
+*/
+
 int max_leaf_idx = 0;
 double INVALID_X = 0.0; // to indicate inner nodes that are empty ;
 
@@ -378,4 +384,59 @@ kdtree* kdtree_build_gpu(double** points, int num_points) {
 //	}
 
 	return kdt;
+}
+
+/*
+
+	CPU
+
+*/
+
+void kdtree_build_cpu_r(double** points, node* root, int axis, int l, int r) { 
+
+	// leaf node	
+	if(r == l || l > r || r-l == 0) {
+		root->p = r;
+		root->leaf = 1; 
+		return;
+	}
+
+	// calculate the split value	
+	int split_index = l + (r-l)/2; // median index
+	if(((r-l)+1)%2 == 0) root->split = (points[split_index][axis] + points[split_index+1][axis])/2; // even number of elements
+	else root->split = points[split_index][axis]; // odd number of elments; clear median
+	
+	root->axis = axis;	
+	root->left = NULL; 
+	root->right = NULL;
+	root->leaf = 0;	
+
+	node* new_node;
+	int next_axis = (axis+1) % 3; // 3 dimensions x,y,z
+	
+	// left child
+	new_node = (node*) malloc(sizeof(node));	
+	root->left = new_node;
+	// sort all the values to the left of split index
+	quicksort(points, l, split_index, next_axis); 
+	kdtree_build_cpu_r(points, root->left, next_axis, l, split_index);	
+
+	// right child	
+	new_node = (node*) malloc(sizeof(node));	
+	root->right = new_node;	
+
+	// sort all the values the right of the split index
+	quicksort(points, split_index+1, r, next_axis); // sort in the next axis 
+	kdtree_build_cpu_r(points, root->right, next_axis, split_index+1, r);		
+}
+
+node* kdtree_build_cpu(double**points, int num_points) {
+
+	printf("kdtree_build_cpu\n");	
+	node* root = (node*) malloc(sizeof(node));	
+
+	quicksort(points, 0, num_points-1, 0);
+	kdtree_build_cpu_r(points, root, 0, 0, num_points-1);
+	
+	return root;	
 }

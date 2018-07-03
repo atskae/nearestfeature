@@ -21,6 +21,7 @@ WORKDIR app
 #	vim
 
 RUN nvcc simpleDeviceQuery.cu -o sdq
+#RUN nvcc --relocatable-device-code true jsmn.c kdtree.c pq.cu nn3d.cu -o nn3d
 RUN nvcc --relocatable-device-code true -g -G -O0 jsmn.c kdtree.c pq.cu nn3d.cu -o nn3d
 #RUN nvcc --relocatable-device-code true -lineinfo -Xcompiler -rdynamic jsmn.c kdtree.c pq.cu nn3d.cu -o nn3d
 

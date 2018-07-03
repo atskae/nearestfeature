@@ -33,4 +33,24 @@ kdtree* kdtree_build(double** points, int num_points);
 kdtree* kdtree_build_gpu(double** points, int num_points);
 void kdtree_build_gpu_r(double** points, int axis, kdtree* kdt, int l, int r, int index, double** pts_x, double** pts_y, double** pts_z);
 
+
+/*
+
+	CPU stuff
+
+*/
+
+typedef struct node {
+	int p; // index into the points array
+	int axis;
+	double split; // the value that determines which nodes go on the left/right
+	char leaf;
+	
+	struct node* left;
+	struct node* right;
+} node;
+
+void kdtree_build_cpu_r(double** points, node* root, int axis, int l, int r);
+node* kdtree_build_cpu(double** points, int num_points);
+
 #endif

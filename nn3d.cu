@@ -583,10 +583,10 @@ __global__ void device_findNearestPoint2(int* results, double* nodes, char* leav
 
 	// initalize priority queue and place root node
 	pqueue* q = (pqueue*) malloc(sizeof(pqueue));
-	if(!q) {
-		printf("Thread %i: malloc pqueue failed\n");
-		return;
-	}
+	//if(!q) {
+	//	printf("Thread %i: malloc pqueue failed\n");
+	//	return;
+	//}
 
 	q->max_size = 1000;
 	q->num_elems = 0;
@@ -597,7 +597,7 @@ __global__ void device_findNearestPoint2(int* results, double* nodes, char* leav
 	//memset(q->dists, 0, q->max_size * sizeof(double));
 
 	// calculate distance from root
-	double dist = qpoints[thread_idx] - nodes[0]; // distance to split node in the x-dimension
+	double dist = fabs( qpoints[thread_idx] - nodes[0] ); // distance to split node in the x-dimension
 	pq_insert(q, 0, dist); // distance to root
 
 	int current_node;
@@ -609,7 +609,7 @@ __global__ void device_findNearestPoint2(int* results, double* nodes, char* leav
 		// extract the current minimum
 		pq_extract(q, &current_node, &current_dist);
 
-		if( fabs(current_dist) >= dist_best) break;
+		if( current_dist >= dist_best) break;
 
 		// descend this subtree until we reach a leaf; add the higher distanced' sibling in the queue as we descend the nodes
 		while(current_node*2+1 < LEN_NODES) { // descend until we reach a leaf node	
@@ -618,17 +618,18 @@ __global__ void device_findNearestPoint2(int* results, double* nodes, char* leav
 			
 			left_idx = current_node*2 + 1;
 			right_idx = current_node*2 + 2;
-			current_axis = (int) floor(log2( (float)(current_node + 1) )) % 3; // log base 2	
-					
+			current_axis = (int) floor(log2( (float)(current_node + 1) )) % 3; // log base 2						
 			current_dist = qpoints[num_queries*current_axis + thread_idx] - nodes[LEN_NODES*current_axis + current_node]; // distance to split node
+
 			if(current_dist < 0) { // visit the left child ; add the RIGHT child to the queue for later
+				
 				if(fabs(current_dist) < dist_best && q->num_elems < q->max_size && fabs(nodes[current_node] - INVALID_X_d) > 1e-32) { // there is potential point that is closer than best on the other side
-					pq_insert(q, right_idx, current_dist);
+					pq_insert(q, right_idx, fabs(current_dist) );
 				}
 				current_node = current_node*2 + 1; // go to left side	
 			} else { // go to right side ; add the LEFT child to the queue later
 				if(fabs(current_dist) < dist_best && q->num_elems < q->max_size && fabs(nodes[current_node] - INVALID_X_d) > 1e-32) { // there is potential point that is closer than best on the other side
-					pq_insert(q, left_idx, current_dist);
+					pq_insert(q, left_idx, fabs(current_dist) );
 				}
 				current_node = current_node*2 + 2; // go to right side		
 			}	
@@ -636,7 +637,8 @@ __global__ void device_findNearestPoint2(int* results, double* nodes, char* leav
 		} // while not at leaf ; end		
 
 		// reached leaf node ; update best seen so far		
-		// calculate distance to the current node	
+		
+		// calculate distance to this leaf node	
 		current_dist = pow((nodes[current_node] - qpoints[thread_idx]), 2); // overwrite old current_dist	
 		current_dist += pow((nodes[LEN_NODES + current_node] - qpoints[num_queries + thread_idx]), 2);	
 		current_dist += pow((nodes[LEN_NODES*2 + current_node] - qpoints[num_queries*2 + thread_idx]), 2);	
@@ -646,7 +648,8 @@ __global__ void device_findNearestPoint2(int* results, double* nodes, char* leav
 			best = current_node;
 			dist_best = current_dist;	
 		}
-	}
+
+	} // while pq not empty ; end
 	
 	//printf("thread %i) best %i, dist_best %.2f, point (%.2f, %.2f, %.2f) isleaf %i\n", thread_idx, best, dist_best, nodes[best], nodes[LEN_NODES + best], nodes[LEN_NODES*2 + best], leaves[best/8]& 1<<(best%8));
 	results[thread_idx] = best;
