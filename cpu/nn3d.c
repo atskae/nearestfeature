@@ -514,152 +514,175 @@ int main(int argc, char* argv[]) {
 	/* running the nearest neightbor algorithm */ 
 	 
 	// stats
-	int num_correct[2] = {0, 0};
-	double avr_pd_pq[2] = {0.0, 0.0}; // average percent difference for priority queue implementation (b/c it is approx)
-	double total_times[3] = {0.0, 0.0, 0.0};
-
-	int num_correct_cpu = 0;
-	double total_time_cpu = 0.0;
-	double pd_cpu = 0.0;	
-
-	double min, dist;
-	int best;
+//	int num_correct[2] = {0, 0};
+//	double avr_pd_pq[2] = {0.0, 0.0}; // average percent difference for priority queue implementation (b/c it is approx)
+//	double total_times[3] = {0.0, 0.0, 0.0};
+//
+//	int num_correct_cpu = 0;
+//	double total_time_cpu = 0.0;
+//	double pd_cpu = 0.0;	
+//
+//	double min, dist;
+//	int best;
 
 	double lat, longt;	
 	double query_pt[3];
 	double range = DBL_MAX;
-	for(int i=0; i<num_queries; i++) {
 
-		// generate a random query
-	
-		lat = (double) (-90) + ( (rand() * (1.0/(RAND_MAX + 1.0))) * (90 - (-90)));
-		longt = (double) (-180) + ( (rand() * (1.0/(RAND_MAX + 1.0))) * (180 - (-180)));
+	/*
+		write data to .csv file
+	*/
+	FILE* output= fopen("results.csv", "w");
+	fprintf(output, "num queries,brute force,kdtree cpu,kdtree cpu accuracy,priority queue,priority queue accuracy\n");
 
-		lat = getRadians(lat);
-		longt = getRadians(longt);
+	for(int double_rate = 1; num_queries*double_rate <= 12800; double_rate*=2) {
+
+		// stats
+		int num_correct[2] = {0, 0};
+		double avr_pd_pq[2] = {0.0, 0.0}; // average percent difference for priority queue implementation (b/c it is approx)
+		double total_times[3] = {0.0, 0.0, 0.0};
 	
-		query_pt[0] = EARTH_RADIUS * cos(lat) * cos(longt); // x
-		query_pt[1] = EARTH_RADIUS * cos(lat) * sin(longt); // y
-		query_pt[2] = EARTH_RADIUS * sin(lat); // z
+		int num_correct_cpu = 0;
+		double total_time_cpu = 0.0;
+		double pd_cpu = 0.0;	
 	
-//		printf("### Query %i: (%.12f, %.12f, %.12f)\n", i, query_pt[0], query_pt[1], query_pt[2]);
+		double min, dist;
+		int best;
+	
+		for(int i=0; i<num_queries*double_rate; i++) {
+	
+			// generate a random query
 		
-		// brute force
-		start = clock();
-		min = range;
-		best = -1;
-		for(int j=0; j<kdt->num_points; j++) {
-			dist = distance(query_pt, points[j]);	
-			if(dist < min) {
-				min = dist; 
-				best = j;
-			}
-		}
-		end = clock();
-		//printf("start =%li, end=%li, %.2f\n", start, end,  (((double) (end - start)) / CLOCKS_PER_SEC) * 1000 );
-		double bf = elapsed(start, end);
-		total_times[0] += bf;	
-
-		if(best == -1) {
-			printf("Something went wrong...\n");
-			continue;
-		}
-
-		double bf_best[3];
-		bf_best[0] = points[best][0];
-	 	bf_best[1] = points[best][1];
-		bf_best[2] = points[best][2];
+			lat = (double) (-90) + ( (rand() * (1.0/(RAND_MAX + 1.0))) * (90 - (-90)));
+			longt = (double) (-180) + ( (rand() * (1.0/(RAND_MAX + 1.0))) * (180 - (-180)));
+	
+			lat = getRadians(lat);
+			longt = getRadians(longt);
 		
-//		printf("bf result \t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", points[best][0], points[best][1], points[best][2], min, best);
-
-		/*
-			CPU kdtree (node structs)
-		*/
-		best_cpu = -1; // index of the points array
-		dist_best_cpu = DBL_MAX;
-		start = clock();
-		findNearestPoint_cpu(points, kdt_cpu, query_pt, &best_cpu, &dist_best_cpu);
-		end = clock();
-		total_time_cpu += elapsed(start, end);
-		//printf("CPU elapsed: %.2f ms\n", elapsed(start, end));
-		double cpu_dist = 0.0;
-		if(best != -1) {
-			cpu_dist = distance(points[best_cpu], query_pt);
-			if(fabs(cpu_dist - min) <= 1e-32) num_correct_cpu++;
-	
-		} else if(best != -1) {
-			pd_cpu += fabs(min - cpu_dist)/((min + cpu_dist)/2) * 100;	
-		} else printf("CPU error\n");
-
-		// cpu but gpu-optimized kdtree; only to verify that a correct tree has been built
-		start = clock();
-		best = findNearestPoint(kdt, query_pt, range);	
-		end = clock();
-	
-		double b[3];
-		if(best != -1) {
-			b[0] = kdt->x[best];
-			b[1] = kdt->y[best];
-			b[2] = kdt->z[best];
-			dist = distance(query_pt, b);
-//			printf("kd result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
-		} else printf("kd: no points could be found...\n");
-		double kd;
-		kd = elapsed(start, end);
-		total_times[1] += kd;
-		double pd;
-		pd = fabs(min - dist)/((min + dist)/2) * 100;
-		avr_pd_pq[0] += pd; 
-
-		//printf("distance: %.2f percent different\n", pd);	
-	  // check for correct answer
-		if(pd != 0) {
+			query_pt[0] = EARTH_RADIUS * cos(lat) * cos(longt); // x
+			query_pt[1] = EARTH_RADIUS * cos(lat) * sin(longt); // y
+			query_pt[2] = EARTH_RADIUS * sin(lat); // z
+		
+	//		printf("### Query %i: (%.12f, %.12f, %.12f)\n", i, query_pt[0], query_pt[1], query_pt[2]);
 			
-			char found = 0;
-			double d1, d2, d3;
-			
-			for(int i=0; i<kdt->array_lim; i++) {	
-				d1 = fabs(bf_best[0] - kdt->x[i]);
-				d2 = fabs(bf_best[1] - kdt->y[i]);
-				d3 = fabs(bf_best[2] - kdt->z[i]);
-		
-				if(d1 < 1e-32 && d2 < 1e-32 && d3 < 1e-32) {
-//					printf("i=%i, (%.12f, %.12f, %.12f)\n", i, kdt->x[i], kdt->y[i], kdt->z[i]);
-					found = 1;
-					break;
+			// brute force
+			start = clock();
+			min = range;
+			best = -1;
+			for(int j=0; j<kdt->num_points; j++) {
+				dist = distance(query_pt, points[j]);	
+				if(dist < min) {
+					min = dist; 
+					best = j;
 				}
 			}
-		
-//			if(found) printf("no excuse... there was a point that had a shorter distance in the kdtree :(\n");
-//			else printf("WAAAAAS\n");
-		
-		} else num_correct[0]++;
+			end = clock();
+			//printf("start =%li, end=%li, %.2f\n", start, end,  (((double) (end - start)) / CLOCKS_PER_SEC) * 1000 );
+			double bf = elapsed(start, end);
+			total_times[0] += bf;	
 	
-		// nearest neighbor using priority queue
-		start = clock();
-		best = findNearestPoint_pq(kdt, query_pt, range);	
-		end = clock();
-		if(best != -1) {
-			dist = distance_by_idx(kdt, best, query_pt);
-//			printf("pq result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i\n", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
-		} else printf("kd pq: no points could be found...\n");
-		kd = elapsed(start, end);
-		total_times[2] += kd;
-
-		pd = fabs(min - dist)/((min + dist)/2) * 100; // percent difference with brute force
-		avr_pd_pq[1] += pd; 
-		if(pd == 0) num_correct[1]++;
-//		printf("distance: %.2f percent different (pq and brute force)\n", pd);	
-		//kdtree_print(kdt);
-//		printf("###\n\n");		
-
-	} // each query point ; end 
-
-	printf("bf: %.5f, CPU-optimized: %.2f, pq: %.5f\n", total_times[0], total_time_cpu, total_times[2]);
-//	printf("kd: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[0], num_queries, ((float) num_correct[0]/num_queries) * 100, (float)avr_pd_pq[0]/num_queries);
-	printf("cp: %i correct out of %i queries (%.2f%% accuracy)\taverage pd: %.2f %%\n", num_correct_cpu, num_queries, (double)num_correct_cpu/num_queries * 100, (double)pd_cpu/num_queries);
-	printf("pq: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[1], num_queries, ((float) num_correct[1]/num_queries) * 100, (double)avr_pd_pq[1]/num_queries);
-//	printf("bf %.5f ms, kd %.5f ms, pq %.5f ms\n", (double) total_times[0]/num_queries, (double) total_times[1]/num_queries, (double) total_times[2]/num_queries);	
-
+			if(best == -1) {
+				printf("Something went wrong...\n");
+				continue;
+			}
+	
+			double bf_best[3];
+			bf_best[0] = points[best][0];
+		 	bf_best[1] = points[best][1];
+			bf_best[2] = points[best][2];
+			
+	//		printf("bf result \t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", points[best][0], points[best][1], points[best][2], min, best);
+	
+			/*
+				CPU kdtree (node structs)
+			*/
+			best_cpu = -1; // index of the points array
+			dist_best_cpu = DBL_MAX;
+			start = clock();
+			findNearestPoint_cpu(points, kdt_cpu, query_pt, &best_cpu, &dist_best_cpu);
+			end = clock();
+			total_time_cpu += elapsed(start, end);
+			//printf("CPU elapsed: %.2f ms\n", elapsed(start, end));;
+			if(best != -1) {
+				if(fabs(dist_best_cpu - min) <= 1e-32) num_correct_cpu++;
+		
+			} else if(best != -1) {
+				pd_cpu += fabs(min - dist_best_cpu)/((min + dist_best_cpu)/2) * 100;	
+			} else printf("CPU error\n");
+	
+			// cpu but gpu-optimized kdtree; only to verify that a correct tree has been built
+			start = clock();
+			best = findNearestPoint(kdt, query_pt, range);	
+			end = clock();
+		
+			double b[3];
+			if(best != -1) {
+				b[0] = kdt->x[best];
+				b[1] = kdt->y[best];
+				b[2] = kdt->z[best];
+				dist = distance(query_pt, b);
+	//			printf("kd result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
+			} else printf("kd: no points could be found...\n");
+			double kd;
+			kd = elapsed(start, end);
+			total_times[1] += kd;
+			double pd;
+			pd = fabs(min - dist)/((min + dist)/2) * 100;
+			avr_pd_pq[0] += pd; 
+	
+			//printf("distance: %.2f percent different\n", pd);	
+		  // check for correct answer
+			if(pd != 0) {
+				
+				char found = 0;
+				double d1, d2, d3;
+				
+				for(int i=0; i<kdt->array_lim; i++) {	
+					d1 = fabs(bf_best[0] - kdt->x[i]);
+					d2 = fabs(bf_best[1] - kdt->y[i]);
+					d3 = fabs(bf_best[2] - kdt->z[i]);
+			
+					if(d1 < 1e-32 && d2 < 1e-32 && d3 < 1e-32) {
+	//					printf("i=%i, (%.12f, %.12f, %.12f)\n", i, kdt->x[i], kdt->y[i], kdt->z[i]);
+						found = 1;
+						break;
+					}
+				}
+			
+	//			if(found) printf("no excuse... there was a point that had a shorter distance in the kdtree :(\n");
+	//			else printf("WAAAAAS\n");
+			
+			} else num_correct[0]++;
+		
+			// nearest neighbor using priority queue
+			start = clock();
+			best = findNearestPoint_pq(kdt, query_pt, range);	
+			end = clock();
+			if(best != -1) {
+				dist = distance_by_idx(kdt, best, query_pt);
+	//			printf("pq result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i\n", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
+			} else printf("kd pq: no points could be found...\n");
+			kd = elapsed(start, end);
+			total_times[2] += kd;
+	
+			pd = fabs(min - dist)/((min + dist)/2) * 100; // percent difference with brute force
+			avr_pd_pq[1] += pd; 
+			if(pd == 0) num_correct[1]++;
+	//		printf("distance: %.2f percent different (pq and brute force)\n", pd);	
+			//kdtree_print(kdt);
+	//		printf("###\n\n");		
+	
+		} // each query point ; end
+	
+	 	fprintf(output, "%i,%.5f,%.5f,%.2f,%.5f,%.2f\n", num_queries*double_rate, total_times[0], total_time_cpu, (double)num_correct_cpu/(num_queries*double_rate) * 100, total_times[2], ((double) num_correct[1]/(num_queries*double_rate) * 100) );
+		
+		printf("bf: %.5f, CPU-optimized: %.2f, pq: %.5f\n", total_times[0], total_time_cpu, total_times[2]);
+	//	printf("kd: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[0], num_queries, ((float) num_correct[0]/num_queries) * 100, (float)avr_pd_pq[0]/num_queries);
+		printf("cp: %i correct out of %i queries (%.2f%% accuracy)\taverage pd: %.2f %%\n", num_correct_cpu, num_queries*double_rate, (double)num_correct_cpu/(num_queries*double_rate)* 100, (double)pd_cpu/(double_rate*num_queries));
+		printf("pq: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[1], num_queries*double_rate, ((double) num_correct[1]/(num_queries*double_rate)) * 100, (double)avr_pd_pq[1]/(double_rate*num_queries));
+	//	printf("bf %.5f ms, kd %.5f ms, pq %.5f ms\n", (double) total_times[0]/num_queries, (double) total_times[1]/num_queries, (double) total_times[2]/num_queries);	
+	} // double rate ; end
+	fclose(output);
+	
 	return 0;		
 }
