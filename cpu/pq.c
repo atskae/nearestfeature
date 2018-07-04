@@ -112,12 +112,14 @@ int pq_insert(pqueue* q, int idx, double dist) {
 }
 
 // returns the index of the kdtree
-int pq_extract(pqueue* q) {
-//	printf("pq_extract()\n");
+int pq_extract(pqueue* q, double* dist) {
+
+	//	printf("pq_extract()\n");
 	if(q->num_elems == 0) return -1;
 
-	// extract the minimum element
+	// extract the minimum element and shortest distance
 	int min = q->elems[0];
+	double min_dist = q->dists[0];
 	q->num_elems--;
 
 	// move the last element to the front
@@ -126,6 +128,9 @@ int pq_extract(pqueue* q) {
 	
 	// heapify down
 	heapify_down(q);	
+
+	// set min distance
+	*dist = min_dist;
 
 	return min;
 }

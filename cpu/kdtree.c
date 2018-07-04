@@ -237,6 +237,7 @@ void kdtree_build_gpu_r(double** points, int axis, kdtree* kdt, int l, int r, in
 		if(index*2 + 2 > kdt->len_nodes-1) {			
 			int prev_lim = kdt->len_nodes - 1;
 			kdt->len_nodes = (index*2 + 2) + 1; // index of the right child
+			kdt->axes = realloc(kdt->axes, kdt->len_nodes * sizeof(int));
 			kdt->leaves = realloc(kdt->leaves, kdt->len_nodes/8 + 1);			
 			if(!kdt->leaves) {
 				printf("Realloc kdt->emptys failed\n");
@@ -283,6 +284,7 @@ void kdtree_build_gpu_r(double** points, int axis, kdtree* kdt, int l, int r, in
 	if(index*2 + 2 > kdt->len_nodes-1) {			
 		int prev_lim = kdt->len_nodes - 1;
 		kdt->len_nodes = (index*2 + 2) + 1; // index of the right child
+		kdt->axes = realloc(kdt->axes, kdt->len_nodes * sizeof(int));
 		kdt->leaves = realloc(kdt->leaves, kdt->len_nodes/8 + 1);			
 		if(!kdt->leaves) {
 			printf("Realloc kdt->emptys failed\n");
@@ -321,6 +323,7 @@ void kdtree_build_gpu_r(double** points, int axis, kdtree* kdt, int l, int r, in
 			printf("This should never happen.\n");
 			break;	
 	}
+	kdt->axes[index] = axis;
 	kdt->num_nodes++;
 	
 	// left child	
@@ -339,7 +342,9 @@ kdtree* kdtree_build_gpu(double** points, int num_points) {
 	INVALID_X = EARTH_RADIUS * cos(invalid) * cos(invalid); 
 	
 	kdtree* kdt = (kdtree*) malloc(sizeof(kdtree));
+	kdt->invalid_x = INVALID_X;
 	kdt->len_nodes = num_points * 2; // the length of the nodes array
+	kdt->axes = malloc(kdt->len_nodes * sizeof(int));
 	kdt->leaves = (char*) malloc( (kdt->len_nodes/8 + 1) * sizeof(char)); // a bitmap of the leaf nodes ; 8 bits/char 
 	if(!kdt->len_nodes || !kdt->leaves) {
 		printf("malloc() kdt->len_nodes or kdt->leaves failed\n");
@@ -371,6 +376,7 @@ kdtree* kdtree_build_gpu(double** points, int num_points) {
 	free(pts_y);
 	free(pts_z);
 
+	kdt->axes = realloc(kdt->axes, kdt->len_nodes * sizeof(int));
 	kdt->leaves = realloc(kdt->leaves, kdt->len_nodes/8 + 1);
 
 //	printf("kdtree in 1D array format\n");

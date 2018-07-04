@@ -4,6 +4,8 @@
 #define PI 3.14159265358979323846
 #define EARTH_RADIUS 6371 // in km
 
+//double INVALID_X; // to indicate inner nodes that are empty ;
+
 typedef struct kdtree {
 	double* x;
 	double* y;
@@ -18,6 +20,7 @@ typedef struct kdtree {
 	int len_nodes; // the length of nodes array`
 	double* nodes; // 1D array of all split nodes and x,y,z coordinates at the leaves
 	char* leaves;
+	double invalid_x;
 } kdtree;
 
 double getRadians(double degrees);

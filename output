@@ -1,5 +1,0 @@
-Parsing complete.
-kdtree_build_r
-kd: 86 correct out of 100 queries (86.00 % accuracy), average pd: 0.68 %
-pq: 8 correct out of 100 queries (8.00 % accuracy), average pd: 0.17 %
-bf 4.26 ms, kd 3.56 ms, pq 2.44 ms

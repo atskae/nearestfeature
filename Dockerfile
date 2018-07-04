@@ -4,6 +4,7 @@ ADD common.h /app/common.h
 ADD simpleDeviceQuery.cu /app/simpleDeviceQuery.cu
 
 ADD geojson/gis_vector_rivers.geojson /app/gis_vector_rivers.geojson
+ADD geojson/TM_WORLD_BORDERS.geojson /app/TM_WORLD_BORDERS.geojson
 ADD geojson/points.geojson /app/points.geojson
 
 ADD cpu/jsmn.h /app/jsmn.h
@@ -21,8 +22,8 @@ WORKDIR app
 #	vim
 
 RUN nvcc simpleDeviceQuery.cu -o sdq
-#RUN nvcc --relocatable-device-code true jsmn.c kdtree.c pq.cu nn3d.cu -o nn3d
-RUN nvcc --relocatable-device-code true -g -G -O0 jsmn.c kdtree.c pq.cu nn3d.cu -o nn3d
+RUN nvcc --relocatable-device-code true jsmn.c kdtree.c pq.cu nn3d.cu -o nn3d
+#RUN nvcc --relocatable-device-code true -g -G -O0 jsmn.c kdtree.c pq.cu nn3d.cu -o nn3d
 #RUN nvcc --relocatable-device-code true -lineinfo -Xcompiler -rdynamic jsmn.c kdtree.c pq.cu nn3d.cu -o nn3d
 
 ENTRYPOINT ./sdq 

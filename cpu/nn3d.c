@@ -20,7 +20,7 @@
 #define BUFFER_SIZE 1600000
 #define PI 3.14159265358979323846
 #define EARTH_RADIUS 6371 // in km
-#define PQ_SIZE 100000 // priority queue size
+#define PQ_SIZE 20 // priority queue size
 
 #define DIM 3 // dimension of cartesian coordinates
 
@@ -424,12 +424,11 @@ int findNearestPoint_pq(kdtree* kdt, double* p, double range) {
 	int current_axis;
 	while(q->num_elems != 0) { // while the queue is not empty
 	// extract the current minimum
-		current_node = pq_extract(q);	
-//		pq_print(q);
-	
+		current_node = pq_extract(q, &current_dist);	
+		if(current_dist >= dist_best) break;
+
 		// descend this subtree until we reach a leaf; add the higher distanced' sibling in the queue as we descend the nodes
 		while(current_node*2+1 <= kdt->array_lim) { // descend until we reach a leaf node
-			
 			left_idx = current_node*2 + 1;
 			right_idx = current_node*2 + 2;
 
@@ -481,6 +480,74 @@ int findNearestPoint_pq(kdtree* kdt, double* p, double range) {
 	return best;
 }
 
+/* NEED TO FIX THIS*/
+// using priority queue with a GPU tree
+int findNearestPoint_pq2(double* nodes, int LEN_NODES, char* leaves, int* axes, double INVALID_X, double* p, double range) {
+
+	int best = -1;
+	double dist_best = range;
+
+	// initalize priority queue and place root node
+	pqueue* q = pq_build(PQ_SIZE);
+	pq_insert(q, 0, fabs(p[0] - nodes[0])); // distance to root ; x-split
+
+	int current_node;
+	int left_idx, right_idx;
+	double current_dist;
+	int current_axis;
+
+	while(q->num_elems != 0) { // while the queue is not empty
+
+		// extract the current minimum
+		current_node = pq_extract(q, &current_dist);
+		if( current_dist >= dist_best) break;
+
+		// descend this subtree until we reach a leaf; add the higher distanced' sibling in the queue as we descend the nodes
+		while(current_node*2 + 1 < LEN_NODES) { // descend until we reach a leaf node	
+		
+			if(leaves[current_node/8] & 1<<(current_node%8)) break;
+
+			left_idx = current_node*2 + 1;
+			right_idx = current_node*2 + 2;
+//			current_axis = (int) floor(log2( (float)(current_node + 1) )) % 3; // log base 2						
+			current_axis = axes[current_node];
+			current_dist = p[current_axis] - nodes[LEN_NODES*current_axis + current_node]; // distance to split node
+
+			if(current_dist < 0) { // visit the left child ; add the RIGHT child to the queue for later
+				current_node = current_node*2 + 1; // go to left side	
+			
+				if(q->num_elems < q->max_size && fabs(current_dist) < dist_best && fabs(nodes[LEN_NODES*current_axis + current_node] - INVALID_X) > 1e-32) {
+					pq_insert(q, right_idx, fabs(current_dist) );
+				}
+				
+			} else { // go to right side ; add the LEFT child to the queue later
+				current_node = current_node*2 + 2; // go to right side
+		
+				if(q->num_elems < q->max_size && fabs(current_dist) < dist_best && fabs(nodes[LEN_NODES*current_axis + current_node] - INVALID_X) > 1e-32) {
+						pq_insert(q, left_idx, fabs(current_dist) );
+				}
+			}	
+
+		} // while not at leaf ; end		
+
+		// reached leaf node ; update best seen so far		
+		
+		// calculate distance to this leaf node	
+		current_dist = pow((nodes[current_node] - p[0]), 2); // overwrite old current_dist	
+		current_dist += pow((nodes[LEN_NODES + current_node] - p[1]), 2);	
+		current_dist += pow((nodes[LEN_NODES*2 + current_node] - p[2]), 2);	
+		current_dist = sqrt(current_dist);		
+
+		if(current_dist < dist_best) {
+			best = current_node;
+			dist_best = current_dist;	
+		}
+	}
+
+	return best;
+}
+
+
 int main(int argc, char* argv[]) {
 
 	time_t start, end;
@@ -510,6 +577,8 @@ int main(int argc, char* argv[]) {
 	printf("CPU kdtree build complete in %.2f ms\n", elapsed(start, end));
 	int best_cpu;
 	double dist_best_cpu;
+
+	kdtree* kdt_gpu= kdtree_build_gpu(points, num_points);
 	
 	/* running the nearest neightbor algorithm */ 
 	 
@@ -533,7 +602,7 @@ int main(int argc, char* argv[]) {
 		write data to .csv file
 	*/
 	FILE* output= fopen("results.csv", "w");
-	fprintf(output, "num queries,brute force,kdtree cpu,kdtree cpu accuracy,priority queue,priority queue accuracy\n");
+	fprintf(output, "num queries,brute force,kdtree cpu,kdtree cpu accuracy,priority queue,priority queue accuracy,priority queue percent difference\n");
 
 	for(int double_rate = 1; num_queries*double_rate <= 12800; double_rate*=2) {
 
@@ -577,7 +646,6 @@ int main(int argc, char* argv[]) {
 				}
 			}
 			end = clock();
-			//printf("start =%li, end=%li, %.2f\n", start, end,  (((double) (end - start)) / CLOCKS_PER_SEC) * 1000 );
 			double bf = elapsed(start, end);
 			total_times[0] += bf;	
 	
@@ -591,7 +659,7 @@ int main(int argc, char* argv[]) {
 		 	bf_best[1] = points[best][1];
 			bf_best[2] = points[best][2];
 			
-	//		printf("bf result \t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", points[best][0], points[best][1], points[best][2], min, best);
+//			printf("bf result \t(%.12f, %.12f, %.12f) dist %.12f, idx %i: ", points[best][0], points[best][1], points[best][2], min, best);
 	
 			/*
 				CPU kdtree (node structs)
@@ -656,11 +724,12 @@ int main(int argc, char* argv[]) {
 		
 			// nearest neighbor using priority queue
 			start = clock();
-			best = findNearestPoint_pq(kdt, query_pt, range);	
+//			best = findNearestPoint_pq(kdt, query_pt, range);	
+			best = findNearestPoint_pq2(kdt_gpu->nodes, kdt_gpu->len_nodes, kdt_gpu->leaves, kdt->axes, kdt->invalid_x, query_pt, range);
 			end = clock();
 			if(best != -1) {
 				dist = distance_by_idx(kdt, best, query_pt);
-	//			printf("pq result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i\n", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
+//				printf("pq result\t(%.12f, %.12f, %.12f) dist %.12f, idx %i\n", kdt->x[best], kdt->y[best], kdt->z[best], dist, best);		
 			} else printf("kd pq: no points could be found...\n");
 			kd = elapsed(start, end);
 			total_times[2] += kd;
@@ -674,7 +743,7 @@ int main(int argc, char* argv[]) {
 	
 		} // each query point ; end
 	
-	 	fprintf(output, "%i,%.5f,%.5f,%.2f,%.5f,%.2f\n", num_queries*double_rate, total_times[0], total_time_cpu, (double)num_correct_cpu/(num_queries*double_rate) * 100, total_times[2], ((double) num_correct[1]/(num_queries*double_rate) * 100) );
+	 	fprintf(output, "%i,%.5f,%.5f,%.2f,%.5f,%.2f,%.2f\n", num_queries*double_rate, total_times[0], total_time_cpu, (double)num_correct_cpu/(num_queries*double_rate) * 100, total_times[2], ((double) num_correct[1]/(num_queries*double_rate) * 100), (double)avr_pd_pq[1]/(double_rate*num_queries) );
 		
 		printf("bf: %.5f, CPU-optimized: %.2f, pq: %.5f\n", total_times[0], total_time_cpu, total_times[2]);
 	//	printf("kd: %i correct out of %i queries\t(%.2f %% accuracy)\taverage pd: %.2f %%\n", num_correct[0], num_queries, ((float) num_correct[0]/num_queries) * 100, (float)avr_pd_pq[0]/num_queries);
